@@ -1,5 +1,12 @@
 # changelog
 
+## 0.2.1
+
+agents show up again.
+
+- omp sessions started with `--resume` were missed, so the agent mark and list stayed empty. they are picked up now and clicking one still jumps to its tmux pane.
+- a session that had exited no longer blocks a live one in the same folder from showing.
+
 ## 0.2.0
 
 lighter on memory and on download.

@@ -206,17 +206,24 @@ final class AgentMonitor {
     }
 
     nonisolated private static func ompSessions() -> [AgentSession] {
-        let rows = run("/bin/ps", ["-Ao", "pid=,ppid=,command="]).split(separator: "\n").compactMap { line -> (pid: String, ppid: String)? in
-            let parts = line.split(separator: " ", maxSplits: 2)
-            guard parts.count == 3, parts[2].hasSuffix("/bin/omp") else { return nil }
-            return (String(parts[0]), String(parts[1]))
+        let rows = run("/bin/ps", ["-Ao", "pid=,ppid=,command="]).split(separator: "\n").compactMap { line -> (pid: String, ppid: String, resume: String?)? in
+            let parts = line.split(separator: " ")
+            guard parts.count >= 3, let omp = parts.dropFirst(2).firstIndex(where: { $0.hasSuffix("/bin/omp") }) else { return nil }
+            let args = parts[(omp + 1)...]
+            let resume = args.firstIndex(of: "--resume").flatMap { args.index(after: $0) < args.endIndex ? String(args[args.index(after: $0)]) : nil }
+            return (String(parts[0]), String(parts[1]), resume)
         }
         let pids = Set(rows.map(\.pid))
-        let launchers = rows.filter { !pids.contains($0.ppid) }.map(\.pid)
+        let launchers = rows.filter { !pids.contains($0.ppid) }
         guard !launchers.isEmpty else { return [] }
 
+        var resumed: [String: pid_t] = [:]
+        for launcher in launchers {
+            if let id = launcher.resume, let pid = pid_t(launcher.pid) { resumed[id] = pid }
+        }
         var wanted: [String: [pid_t]] = [:]
-        let cwdOutput = run("/usr/sbin/lsof", ["-a", "-p", launchers.joined(separator: ","), "-d", "cwd", "-Fn"])
+        let fresh = launchers.filter { $0.resume == nil }.map(\.pid)
+        let cwdOutput = fresh.isEmpty ? "" : run("/usr/sbin/lsof", ["-a", "-p", fresh.joined(separator: ","), "-d", "cwd", "-Fn"])
         var current: pid_t?
         for line in cwdOutput.split(separator: "\n") {
             if line.hasPrefix("p") { current = pid_t(line.dropFirst()) }
@@ -251,9 +258,8 @@ final class AgentMonitor {
                 }
                 guard let cwd else { continue }
                 let real = URL(fileURLWithPath: cwd).resolvingSymlinksInPath().path
-                guard var pids = wanted[real], let pid = pids.first else { continue }
-                pids.removeFirst()
-                wanted[real] = pids
+                let resumedPID = resumed.first { file.lastPathComponent.contains($0.key) }?.value
+                guard resumedPID != nil || wanted[real]?.isEmpty == false else { continue }
 
                 var state: AgentSession.State? = .paused
                 for line in tailLines(of: file, bytes: 64 * 1024).reversed() {
@@ -267,6 +273,15 @@ final class AgentMonitor {
                     break
                 }
                 guard let state else { continue }
+                let pid: pid_t
+                if let resumedPID {
+                    pid = resumedPID
+                } else {
+                    guard var pids = wanted[real], let first = pids.first else { continue }
+                    pids.removeFirst()
+                    wanted[real] = pids
+                    pid = first
+                }
                 found.append(AgentSession(id: "omp-\(file.lastPathComponent)", kind: .omp, title: title, account: nil,
                                           project: URL(fileURLWithPath: cwd).lastPathComponent, state: state, pid: pid))
             }
