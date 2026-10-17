@@ -13,6 +13,7 @@ a dynamic island for the mac notch.
 - feature switcher: flip between music and agents
 - live activities: caps lock, focus, volume, brightness, battery and agent finished, replacing the system volume and brightness popups
 - lock screen padlock that springs open on unlock
+- a short welcome on first launch: accessibility and open at login
 - settings with a pane per feature
 - updates from github releases, with what changed
 

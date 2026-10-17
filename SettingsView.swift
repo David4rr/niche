@@ -5,6 +5,7 @@ import SwiftUI
 struct SettingsView: View {
     @Bindable var lab: LabState
     @State private var pane: Pane? = .general
+    @State private var openAtLogin = OpenAtLogin.isOn
 
     enum Pane: String, CaseIterable, Identifiable {
         case general = "General", music = "Music", agents = "Agents", liveActivities = "Live Activities"
@@ -68,6 +69,8 @@ struct SettingsView: View {
         Group {
             Section {
                 Toggle("Show in menu bar", isOn: $lab.showInMenuBar)
+                Toggle("Open at login", isOn: $openAtLogin)
+                    .onChange(of: openAtLogin) { _, on in OpenAtLogin.isOn = on }
             } footer: {
                 Text("Right-click the notch to open these settings when the menu bar icon is hidden.")
             }

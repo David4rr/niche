@@ -1,0 +1,34 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "display-p3:0.13000,0.14000,0.17000,1.00000",
+      "display-p3:0.01000,0.01000,0.01500,1.00000"
+    ]
+  },
+  "groups" : [
+    {
+      "layers" : [
+        { "image-name" : "disk.png", "name" : "disk" }
+      ],
+      "shadow" : { "kind" : "neutral", "opacity" : 0.5 },
+      "translucency" : { "enabled" : true, "value" : 0.3 }
+    },
+    {
+      "layers" : [
+        { "image-name" : "hole.png", "name" : "hole" }
+      ],
+      "shadow" : { "kind" : "neutral", "opacity" : 0.6 },
+      "translucency" : { "enabled" : false, "value" : 0 }
+    },
+    {
+      "layers" : [
+        { "image-name" : "halo.png", "name" : "halo" }
+      ],
+      "shadow" : { "kind" : "none", "opacity" : 0 },
+      "translucency" : { "enabled" : true, "value" : 0.2 }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [ "macOS" ]
+  }
+}

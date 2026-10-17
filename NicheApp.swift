@@ -417,6 +417,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: NSPanel!
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow?
+    private var onboardingWindow: NSWindow?
     private var notchSpace: UInt64 = 0
     private var monitors: [Any] = []
     private var playbackTimer: Timer?
@@ -496,6 +497,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSMenu.popUpContextMenu(menu, with: event, for: view)
             return nil
         } as Any)
+
+        if !UserDefaults.standard.bool(forKey: "onboarded") { openOnboarding() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -535,5 +538,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindow?.center()
         NSApp.activate()
         settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    private func openOnboarding() {
+        let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: OnboardingView(lab: lab) { [weak window] in window?.close() })
+        window.setContentSize(window.contentView!.fittingSize)
+        monitors.append(NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+            UserDefaults.standard.set(true, forKey: "onboarded")
+            Task { @MainActor in self?.onboardingWindow = nil }
+        })
+        onboardingWindow = window
+        window.center()
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
     }
 }

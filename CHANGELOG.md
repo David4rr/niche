@@ -1,5 +1,15 @@
 # changelog
 
+## 0.3.1
+
+a proper welcome and an icon.
+
+- first launch opens a short welcome: allow accessibility and choose whether niche opens at login. nothing else is needed.
+- open at login is also in settings, under general.
+- niche has its own icon now, a black hole, made for the macos 26 icon style with light, dark, clear and tinted looks.
+- plugging in or unplugging the charger no longer pops up the brightness bar when macos adjusts the brightness by itself.
+- the icon makes the download bigger, about 3.4 mb instead of 231 kb. memory is unchanged, about 20 mb when idle.
+
 ## 0.3.0
 
 live activities.

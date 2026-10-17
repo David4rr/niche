@@ -48,6 +48,7 @@ final class LiveActivityCenter {
     @ObservationIgnored private var lastCaps: Bool?
     @ObservationIgnored private var brightnessRegistered = false
     @ObservationIgnored private var lastBrightness: Double?
+    @ObservationIgnored private var powerChangedAt = Date.distantPast
     @ObservationIgnored private var focusProcess: Process?
     @ObservationIgnored private var lastFocus: Bool?
     @ObservationIgnored private var focusSymbol = "moon.fill"
@@ -96,10 +97,6 @@ final class LiveActivityCenter {
     }
 
     func start() {
-        if replacesSystemHUD && !UserDefaults.standard.bool(forKey: "askedAccessibility") {
-            UserDefaults.standard.set(true, forKey: "askedAccessibility")
-            requestAccessibility()
-        }
         restart()
     }
 
@@ -173,7 +170,7 @@ final class LiveActivityCenter {
             if !brightnessRegistered { NSLog("Niche could not register for brightness changes") }
         }
         if watching(.focus) { watchFocus() }
-        if watching(.lowBattery) || watching(.charging) || watching(.fullyCharged) { watchBattery() }
+        if watching(.lowBattery) || watching(.charging) || watching(.fullyCharged) || watching(.brightness) { watchBattery() }
         if watching(.volume) { watchVolume() }
     }
 
@@ -290,7 +287,8 @@ final class LiveActivityCenter {
     }
 
     private func brightnessChanged(_ level: Double) {
-        if lastBrightness.map({ abs($0 - level) > 0.001 }) != false {
+        let systemRamp = Date().timeIntervalSince(powerChangedAt) < 3
+        if !systemRamp && lastBrightness.map({ abs($0 - level) > 0.001 }) != false {
             show(Activity(kind: .brightness, level: level), for: 1.4)
         }
         lastBrightness = level
@@ -374,6 +372,7 @@ final class LiveActivityCenter {
         let full = onAC && (level >= 100 || battery[kIOPSIsChargedKey] as? Bool == true)
         let now = (level: level, onAC: onAC, full: full)
         if let last = lastBattery {
+            if onAC != last.onAC { powerChangedAt = Date() }
             let fraction = Double(level) / 100
             if full && !last.full && watching(.fullyCharged) {
                 show(Activity(kind: .fullyCharged, level: fraction), for: 2.5)
