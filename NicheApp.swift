@@ -32,6 +32,7 @@ final class LabState {
     let player = MusicPlayer()
     let agents = AgentMonitor()
     let updater = Updater()
+    let liveActivities = LiveActivityCenter()
     enum Feature: CaseIterable { case music, agents }
     var selectedFeature: Feature?
     var selectedAgent: AgentKind?
@@ -50,6 +51,10 @@ final class LabState {
         self.showLockIndicator = defaults.bool(forKey: "showLockIndicator")
         player.spectrum.isEnabled = liveVisualizer
         applyAgentSettings()
+        agents.onFinished = { [weak self] session in
+            guard let self, self.liveActivities.isEnabled(.agentDone), self.liveActivities.isOn else { return }
+            self.liveActivities.agentFinished(session.kind)
+        }
 
         let center = DistributedNotificationCenter.default()
         center.addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
@@ -76,13 +81,19 @@ final class LabState {
     static func closedSize(hasContent: Bool) -> CGSize {
         CGSize(width: hardwareNotch.width + (hasContent ? 2 * MusicClosedView.slot : 0), height: hardwareNotch.height)
     }
-    static let openSize = CGSize(width: hardwareNotch.width + 170, height: 144)
+    static let openSize = CGSize(width: hardwareNotch.width + 160, height: 175)
 
-    var hasClosedContent: Bool { shownFeature != nil || lockState != .none }
+    var hasClosedContent: Bool { shownFeature != nil || lockState != .none || liveActivities.current != nil }
     var hasOpenableContent: Bool { player.track != nil || !agents.isEmpty }
 
+    var activityRoom: CGFloat {
+        controller.isExpanded && liveActivities.current != nil && shownAgent == nil ? Self.hardwareNotch.height + 4 - 18 : 0
+    }
+
     var currentSize: CGSize {
-        controller.isExpanded ? Self.openSize : Self.closedSize(hasContent: hasClosedContent)
+        controller.isExpanded
+            ? CGSize(width: Self.openSize.width, height: Self.openSize.height + activityRoom)
+            : Self.closedSize(hasContent: hasClosedContent)
     }
 
     var activeFeatures: [Feature] {
@@ -189,15 +200,16 @@ struct NicheView: View {
                                 lab.agents.focus(session)
                                 lab.setOpen(false)
                             }
-                                .frame(width: LabState.openSize.width - 2 * 20,
+                                .frame(width: LabState.openSize.width - 2 * 18,
                                        height: LabState.openSize.height - LabState.hardwareNotch.height - 16, alignment: .top)
+                                .padding(.top, LabState.hardwareNotch.height + 2)
                         } else {
-                            MusicExpandedView(player: lab.player, width: LabState.openSize.width - 2 * 20)
+                            MusicExpandedView(player: lab.player, width: LabState.openSize.width - 2 * 18)
+                                .padding(.top, 18 + lab.activityRoom)
                         }
                     }
-                        .padding(.top, LabState.hardwareNotch.height + 2)
-                        .frame(width: LabState.openSize.width + 2 * 16, height: LabState.openSize.height, alignment: .top)
-                        .overlay(alignment: .top) { ears }
+                        .frame(width: LabState.openSize.width + 2 * 16, height: size.height, alignment: .top)
+                        .overlay(alignment: .top) { topRow }
                         .drawingGroup()
                         .blur(radius: c.isSharp ? 0 : 5)
                         .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.12)),
@@ -206,6 +218,13 @@ struct NicheView: View {
                     LockIndicator(state: lab.lockState)
                         .frame(width: LabState.closedSize(hasContent: true).width, height: LabState.hardwareNotch.height)
                         .transition(.opacity.combined(with: .scale(scale: 0.6, anchor: .leading)))
+                } else if let activity = lab.liveActivities.current {
+                    LiveActivityView(activity: activity)
+                        .id(activity.kind)
+                        .frame(width: LabState.closedSize(hasContent: true).width, height: LabState.hardwareNotch.height)
+                        .drawingGroup()
+                        .transition(.asymmetric(insertion: AnyTransition(.blurReplace).animation(.spring(response: 0.35, dampingFraction: 0.9)),
+                                                removal: .opacity.animation(.easeOut(duration: 0.12))))
                 } else {
                     Group {
                         if closedFeature == .agents {
@@ -216,7 +235,7 @@ struct NicheView: View {
                     }
                         .frame(width: LabState.closedSize(hasContent: true).width, height: LabState.hardwareNotch.height)
                         .modifier(ClosedContentFade(isShown: lab.hasClosedContent))
-                        .transition(Self.closedContentTransition)
+                        .transition(Self.closedContentTransition(afterClosing: c.isCollapsing || c.isExpanded))
                 }
                 NotchShape(topCornerRadius: radii.top, bottomCornerRadius: radii.bottom)
                     .stroke(LinearGradient(stops: [.init(color: .white.opacity(0.28), location: 0),
@@ -242,6 +261,9 @@ struct NicheView: View {
             .onChange(of: lab.hasOpenableContent) { _, has in if !has { lab.setOpen(false) } }
             .onChange(of: lab.shownFeature, initial: true) { _, feature in
                 if let feature { closedFeature = feature }
+            }
+            .onChange(of: lab.player.isPlaying) { _, playing in
+                if playing { lab.selectedFeature = .music }
             }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 0)
@@ -269,20 +291,35 @@ struct NicheView: View {
             : .spring(response: 0.45, dampingFraction: 0.95)
     }
 
-    private static let closedContentTransition = AnyTransition.asymmetric(
-        insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.25)),
-        removal: .opacity.animation(.easeOut(duration: 0.1))
-    )
+    private static func closedContentTransition(afterClosing: Bool) -> AnyTransition {
+        .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(afterClosing ? 0.25 : 0.05)),
+                    removal: .opacity.animation(.easeOut(duration: 0.1)))
+    }
+
+    @ViewBuilder private var topRow: some View {
+        if let activity = lab.liveActivities.current {
+            LiveActivityView(activity: activity)
+                .id(activity.kind)
+                .padding(.horizontal, 16 + 4)
+                .frame(height: LabState.hardwareNotch.height)
+                .transition(.asymmetric(insertion: AnyTransition(.blurReplace).animation(.spring(response: 0.35, dampingFraction: 0.9)),
+                                        removal: .opacity.animation(.easeOut(duration: 0.15))))
+        } else {
+            ears
+                .transition(.opacity.animation(.easeOut(duration: 0.2).delay(0.1)))
+        }
+    }
 
     private var ears: some View {
         HStack(spacing: 4) {
+            if lab.shownAgent == nil { Spacer(minLength: 0) }
             if lab.activeFeatures.contains(.agents) {
                 ForEach(AgentKind.allCases, id: \.self) { kind in
                     let sessions = lab.agents.sessions(of: kind)
                     if !sessions.isEmpty {
                         Button { lab.showAgent(kind) } label: {
                             AgentIndicator(kind: kind, sessions: sessions)
-                                .frame(width: 28, height: 22)
+                                .frame(width: 26, height: 22)
                                 .background(Capsule().fill(.white.opacity(lab.shownAgent == kind ? 0.18 : 0.06)))
                                 .contentShape(Capsule())
                         }
@@ -291,7 +328,7 @@ struct NicheView: View {
                     }
                 }
             }
-            Spacer(minLength: 0)
+            if lab.shownAgent != nil { Spacer(minLength: 0) }
             let upcoming = lab.upcomingFeatures
             if !upcoming.isEmpty, let current = lab.shownFeature {
                 let stack = upcoming + [current]
@@ -313,7 +350,7 @@ struct NicheView: View {
                 .transition(.scale(scale: 0.5).combined(with: .opacity))
             }
         }
-        .padding(.horizontal, 16 + 12)
+        .padding(.horizontal, 16 + 10)
         .frame(height: LabState.hardwareNotch.height)
     }
 }
@@ -430,6 +467,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lab.player.start()
         lab.agents.start()
         lab.updater.start()
+        lab.liveActivities.start()
         for sig in [SIGTERM, SIGINT] {
             signal(sig, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
@@ -462,6 +500,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         lab.player.stop()
+        lab.liveActivities.stop()
         let cid = CGSDefaultConnection()
         CGSHideSpaces(cid, [notchSpace] as NSArray)
         CGSSpaceDestroy(cid, notchSpace)

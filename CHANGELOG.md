@@ -1,5 +1,17 @@
 # changelog
 
+## 0.3.0
+
+live activities.
+
+- short popups in the notch for caps lock, focus, volume, brightness, low battery, charging, fully charged and when an agent finishes. each one can be turned off in settings.
+- with accessibility allowed, niche takes over the volume and brightness keys so the system popup no longer shows. macos still shows its own focus banner, that one can't be hidden.
+- activities also show when the notch is open, and the notch grows a little to fit them.
+- the open notch is a bit bigger with larger artwork and controls, and the closed notch is slimmer.
+- music shows up again after the notch was stuck on agents, and it switches back to music when something starts playing.
+- the closed agent view shows a plain mark without the extra dot.
+- niche is now signed with a stable identity, so permissions stick across updates. you may need to allow accessibility once more after this update.
+
 ## 0.2.1
 
 agents show up again.

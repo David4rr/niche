@@ -64,14 +64,11 @@ final class MusicPlayer {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
-        let output = pipe.fileHandleForReading
-        Task.detached { [weak self] in
-            for try await line in output.bytes.lines {
-                guard let json = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
-                      let payload = json["payload"] as? [String: Any] else { continue }
-                let snapshot = NowPlayingSnapshot(payload)
-                await self?.apply(snapshot)
-            }
+        readLines(from: pipe.fileHandleForReading, label: "niche.nowplaying") { [weak self] line in
+            guard let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                  let payload = json["payload"] as? [String: Any] else { return }
+            let snapshot = NowPlayingSnapshot(payload)
+            Task { @MainActor in self?.apply(snapshot) }
         }
         process.terminationHandler = { [weak self] _ in
             Task { @MainActor in
@@ -160,6 +157,21 @@ final class MusicPlayer {
         let next = repeatMode == 1 ? 3 : repeatMode - 1
         setRepeat(next)
         repeatMode = next
+    }
+}
+
+func readLines(from handle: FileHandle, label: String, line: @escaping @Sendable (Data) -> Void) {
+    DispatchQueue(label: label, qos: .utility).async {
+        var buffer = Data()
+        while true {
+            let chunk = handle.availableData
+            if chunk.isEmpty { return }
+            buffer.append(chunk)
+            while let end = buffer.firstIndex(of: 0x0A) {
+                line(buffer[buffer.startIndex..<end])
+                buffer.removeSubrange(buffer.startIndex...end)
+            }
+        }
     }
 }
 
@@ -411,39 +423,39 @@ struct MusicExpandedView: View {
             playing(track)
         } else {
             Text("Nothing playing").font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.5))
-                .frame(width: width, height: 97)
+                .frame(width: width, height: 120)
         }
     }
 
     private func playing(_ track: Track) -> some View {
-        let art: CGFloat = 48
-        let waveWidth: CGFloat = 4 * 3 + 3 * 2.25
+        let art: CGFloat = 56
+        let waveWidth: CGFloat = 4 * 2.5 * 1.75
         return VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: 11)
+            HStack(spacing: 12) {
+                ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: 12)
                     .frame(width: art, height: art)
                 VStack(alignment: .leading, spacing: 0) {
                     ZStack(alignment: .leading) {
-                        MarqueeText(text: track.title, font: .system(size: 13, weight: .semibold),
-                                    width: width - art - waveWidth - 24)
+                        MarqueeText(text: track.title, font: .system(size: 14.5, weight: .semibold),
+                                    width: width - art - waveWidth - 28)
                             .id(player.songChangeToken)
                             .transition(.blurReplace(.downUp))
                     }
-                    .frame(height: 16)
+                    .frame(height: 18)
                     ZStack(alignment: .leading) {
-                        Text(track.artist).font(.system(size: 12.5, weight: .medium)).foregroundStyle(.white.opacity(0.55))
+                        Text(track.artist).font(.system(size: 13.5, weight: .medium)).foregroundStyle(.white.opacity(0.55))
                             .lineLimit(1)
                             .id(player.songChangeToken)
                             .transition(.blurReplace(.downUp))
                     }
-                    .frame(height: 15)
+                    .frame(height: 17)
                 }
                 .animation(.spring(Spring(duration: 0.38, bounce: 0.25), blendDuration: 0), value: player.songChangeToken)
                 Spacer(minLength: 0)
-                WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 3, maxHeight: 16)
+                WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 2.5, maxHeight: 14)
             }
             .frame(height: art)
-            .padding(.bottom, 6)
+            .padding(.bottom, 13)
             HStack(spacing: 8) {
                 timeLabel(player.position)
                 ProgressBar(fraction: player.position / track.duration, isSeeking: isSeeking, songToken: player.songChangeToken) { fraction in
@@ -454,14 +466,14 @@ struct MusicExpandedView: View {
                 timeLabel(track.duration - player.position, negative: true)
             }
             .frame(height: 12)
-            .padding(.bottom, 2)
+            .padding(.bottom, 20)
             HStack(spacing: 0) {
                 controlButton("shuffle", size: 18) { player.toggleShuffle() }
                     .opacity(player.isShuffled ? 1 : 0.45)
-                controlButton("backward.fill", size: 19) { player.skip(forward: false) }
-                controlButton(player.isPlaying ? "pause.fill" : "play.fill", size: 19) { player.togglePlay() }
+                controlButton("backward.fill", size: 22) { player.skip(forward: false) }
+                controlButton(player.isPlaying ? "pause.fill" : "play.fill", size: 26) { player.togglePlay() }
                     .contentTransition(.symbolEffect(.replace))
-                controlButton("forward.fill", size: 19) { player.skip(forward: true) }
+                controlButton("forward.fill", size: 22) { player.skip(forward: true) }
                 controlButton(player.repeatMode == 2 ? "repeat.1" : "repeat", size: 18) { player.cycleRepeat() }
                     .opacity(player.repeatMode == 1 ? 0.45 : 1)
             }
@@ -483,8 +495,8 @@ struct MusicExpandedView: View {
     private func controlButton(_ symbol: String, size: CGFloat, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: size, weight: .medium))
-                .frame(width: 20, height: 20)
-                .frame(width: 48)
+                .frame(width: 30, height: 30)
+                .frame(maxWidth: .infinity)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -493,19 +505,21 @@ struct MusicExpandedView: View {
 
 struct MusicClosedView: View {
     let player: MusicPlayer
-    static let slot: CGFloat = 42
+    static let slot: CGFloat = 38
     @State private var lastTrack: Track?
 
     var body: some View {
         let shown = player.track ?? lastTrack
         HStack(spacing: 0) {
             if let track = shown {
-                ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: 7)
-                    .frame(width: 26, height: 26)
-                    .frame(width: Self.slot)
+                ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: 5)
+                    .frame(width: 20, height: 20)
+                    .padding(.leading, 7)
+                    .frame(width: Self.slot, alignment: .leading)
                 Spacer(minLength: 0)
-                WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 3.5, maxHeight: 16)
-                    .frame(width: Self.slot)
+                WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)
+                    .padding(.trailing, 9)
+                    .frame(width: Self.slot, alignment: .trailing)
             }
         }
         .onAppear { lastTrack = player.track }

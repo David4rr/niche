@@ -25,6 +25,7 @@ final class AgentMonitor {
     @ObservationIgnored var enabled: Set<AgentKind> = [] {
         didSet { refresh() }
     }
+    @ObservationIgnored var onFinished: ((AgentSession) -> Void)?
 
     var isEmpty: Bool { sessions.isEmpty }
 
@@ -47,6 +48,10 @@ final class AgentMonitor {
                 guard let self else { return }
                 let live = found.filter { self.enabled.contains($0.kind) }
                 guard self.sessions != live else { return }
+                let wasWorking = Set(self.sessions.filter { $0.state == .working }.map(\.id))
+                for session in live where session.state == .paused && wasWorking.contains(session.id) {
+                    self.onFinished?(session)
+                }
                 withAnimation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0)) { self.sessions = live }
             }
         }
@@ -441,7 +446,7 @@ struct AgentClosedView: View {
         HStack(spacing: 0) {
             HStack(spacing: 7) {
                 ForEach(live, id: \.self) { kind in
-                    AgentIndicator(kind: kind, sessions: sessions.filter { $0.kind == kind })
+                    AgentGlyph(kind: kind, size: 14)
                         .transition(.scale(scale: 0.5).combined(with: .opacity))
                 }
             }

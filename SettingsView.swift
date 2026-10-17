@@ -7,13 +7,15 @@ struct SettingsView: View {
     @State private var pane: Pane? = .general
 
     enum Pane: String, CaseIterable, Identifiable {
-        case general = "General", music = "Music", agents = "Agents", lockScreen = "Lock Screen", updates = "Updates"
+        case general = "General", music = "Music", agents = "Agents", liveActivities = "Live Activities"
+        case lockScreen = "Lock Screen", updates = "Updates"
         var id: Self { self }
         var symbol: String {
             switch self {
             case .general: "gearshape.fill"
             case .music: "music.note"
             case .agents: "sparkles"
+            case .liveActivities: "dot.radiowaves.left.and.right"
             case .lockScreen: "lock.fill"
             case .updates: "arrow.down.circle.fill"
             }
@@ -23,6 +25,7 @@ struct SettingsView: View {
             case .general: .gray
             case .music: Color(red: 1, green: 0.42, blue: 0.55)
             case .agents: Color(red: 0.72, green: 0.5, blue: 0.95)
+            case .liveActivities: .orange
             case .lockScreen: .blue
             case .updates: .green
             }
@@ -50,6 +53,7 @@ struct SettingsView: View {
                 case .general: general
                 case .music: music
                 case .agents: agents
+                case .liveActivities: liveActivities
                 case .lockScreen: lockScreen
                 case .updates: updates
                 }
@@ -126,6 +130,46 @@ struct SettingsView: View {
             Toggle("Show lock indicator", isOn: $lab.showLockIndicator)
         } footer: {
             Text("A padlock sits beside the notch on the lock screen and springs open when you unlock.")
+        }
+    }
+
+    private var liveActivities: some View {
+        let center = lab.liveActivities
+        return Group {
+            Section {
+                Toggle("Live activities", isOn: Binding(get: { center.isOn }, set: { center.isOn = $0 }))
+            } footer: {
+                Text("Short popups in the closed notch when something changes, then it goes back to what it was showing.")
+            }
+            Section("Show") {
+                ForEach(LiveActivityCenter.Kind.allCases) { kind in
+                    Toggle(kind.title, isOn: Binding(get: { center.isEnabled(kind) }, set: { center.setEnabled(kind, $0) }))
+                }
+            }
+            .disabled(!center.isOn)
+            Section {
+                Toggle("Replace the system volume and brightness popups",
+                       isOn: Binding(get: { center.replacesSystemHUD }, set: { center.replacesSystemHUD = $0 }))
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    let trusted = AXIsProcessTrusted()
+                    LabeledContent("Accessibility") {
+                        HStack(spacing: 8) {
+                            Text(trusted ? "Allowed" : "Not allowed")
+                                .foregroundStyle(trusted ? .green : .orange)
+                            if !trusted {
+                                Button("Grant Permission") {
+                                    center.requestAccessibility()
+                                    let pane = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+                                    if let url = URL(string: pane) { NSWorkspace.shared.open(url) }
+                                }
+                            }
+                        }
+                    }
+                }
+            } footer: {
+                Text("Niche needs your permission to hide and replace the system volume and brightness popups. It takes over those keys so only the notch shows the change. Focus has no key to take over, so macOS may still show its own Focus banner.")
+            }
+            .disabled(!center.isOn)
         }
     }
 

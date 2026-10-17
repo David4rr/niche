@@ -11,6 +11,7 @@ a dynamic island for the mac notch.
 - agents: live claude code and omp sessions, working or paused
 - click a session to jump to its tmux pane and terminal tab
 - feature switcher: flip between music and agents
+- live activities: caps lock, focus, volume, brightness, battery and agent finished, replacing the system volume and brightness popups
 - lock screen padlock that springs open on unlock
 - settings with a pane per feature
 - updates from github releases, with what changed
