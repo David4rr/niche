@@ -1,5 +1,11 @@
 # changelog
 
+## 0.1.2
+
+a fix for stale artwork.
+
+- after quitting the music app and playing something else, the closed notch kept showing the old album until you opened it. it now switches to the new one right away.
+
 ## 0.1.1
 
 smoother notch when things come and go.

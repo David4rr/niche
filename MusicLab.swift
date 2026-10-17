@@ -31,6 +31,7 @@ final class MusicPlayer {
     @ObservationIgnored private var timestamp = Date()
     @ObservationIgnored private var rate: Double = 1
     @ObservationIgnored private var pendingSong: Track?
+    @ObservationIgnored private var lastSong: Track?
     @ObservationIgnored private var pendingDeadline: Task<Void, Never>?
     @ObservationIgnored private var process: Process?
     @ObservationIgnored private let send: @convention(c) (Int, AnyObject?) -> Bool
@@ -104,7 +105,7 @@ final class MusicPlayer {
         rate = snapshot.rate
         spectrum.follow(pid: snapshot.isPlaying ? snapshot.pid : nil)
 
-        let isNewSong = track.map { !$0.isSameSong(as: next) } ?? false
+        let isNewSong = lastSong.map { !$0.isSameSong(as: next) } ?? false
         if isNewSong && next.artwork == nil {
             if pendingSong.map({ !$0.isSameSong(as: next) }) ?? true {
                 pendingDeadline?.cancel()
@@ -123,9 +124,10 @@ final class MusicPlayer {
     private func commit(_ next: Track) {
         pendingSong = nil
         pendingDeadline?.cancel()
-        if let current = track, !current.isSameSong(as: next) {
+        if let previous = lastSong, !previous.isSameSong(as: next) {
             songChangeToken += 1
         }
+        lastSong = next
         track = next
         tick()
     }
