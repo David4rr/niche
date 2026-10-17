@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import SwiftUI
 
 struct Track: Equatable {
@@ -173,16 +174,21 @@ private struct NowPlayingSnapshot: @unchecked Sendable {
     let pid: pid_t?
 
     nonisolated(unsafe) private static let iso: ISO8601DateFormatter = ISO8601DateFormatter()
+    nonisolated(unsafe) private static var cachedArtwork: (key: String, image: NSImage?) = ("", nil)
 
     init(_ p: [String: Any]) {
         if let title = p["title"] as? String, !title.isEmpty {
             let art = p["artworkData"] as? String
+            let key = art.map { "\($0.count):\($0.suffix(32))" } ?? ""
+            if key != Self.cachedArtwork.key {
+                Self.cachedArtwork = (key, art.flatMap { Data(base64Encoded: $0) }.flatMap(Self.thumbnail))
+            }
             track = Track(title: title,
                           artist: p["artist"] as? String ?? "",
                           album: p["album"] as? String ?? "",
                           duration: p["duration"] as? Double ?? 0,
-                          artwork: art.flatMap { Data(base64Encoded: $0) }.flatMap { NSImage(data: $0) },
-                          artworkKey: art.map { "\($0.count):\($0.suffix(32))" } ?? "")
+                          artwork: Self.cachedArtwork.image,
+                          artworkKey: key)
         } else {
             track = nil
         }
@@ -193,6 +199,16 @@ private struct NowPlayingSnapshot: @unchecked Sendable {
         shuffleMode = p["shuffleMode"] as? Int
         repeatMode = p["repeatMode"] as? Int
         pid = (p["processIdentifier"] as? Int).map { pid_t($0) }
+    }
+
+    private static func thumbnail(_ data: Data) -> NSImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceThumbnailMaxPixelSize: 128,
+                  kCGImageSourceShouldCacheImmediately: true,
+              ] as CFDictionary) else { return nil }
+        return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
     }
 }
 
@@ -460,8 +476,6 @@ struct MusicExpandedView: View {
         return Text("\(negative ? "-" : "")\(s / 60):\(String(format: "%02d", s % 60))")
             .font(.system(size: 10.5, weight: .semibold)).kerning(0.1)
             .monospacedDigit()
-            .contentTransition(.numericText(countsDown: negative))
-            .animation(.smooth(duration: 0.25), value: s)
             .foregroundStyle(.white.opacity(0.55))
             .frame(width: 36, alignment: negative ? .trailing : .leading)
     }

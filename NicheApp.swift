@@ -160,6 +160,10 @@ final class LabState {
         } else {
             c.collapse()
             selectedAgent = nil
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                malloc_zone_pressure_relief(nil, 0)
+            }
         }
     }
 }
@@ -194,6 +198,7 @@ struct NicheView: View {
                         .padding(.top, LabState.hardwareNotch.height + 2)
                         .frame(width: LabState.openSize.width + 2 * 16, height: LabState.openSize.height, alignment: .top)
                         .overlay(alignment: .top) { ears }
+                        .drawingGroup()
                         .blur(radius: c.isSharp ? 0 : 5)
                         .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.12)),
                                                 removal: .opacity.animation(.easeOut(duration: 0.1))))
@@ -484,6 +489,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.isReleasedWhenClosed = false
             window.setContentSize(NSSize(width: 640, height: 420))
             settingsWindow = window
+            monitors.append(NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.settingsWindow = nil }
+            })
         }
         settingsWindow?.center()
         NSApp.activate()

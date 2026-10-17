@@ -1,5 +1,15 @@
 # changelog
 
+## 0.2.0
+
+lighter on memory and on download.
+
+- fixed memory that kept growing while the notch was open. it used to climb past 50 mb, now it settles around 30 mb open and 18 mb closed.
+- artwork is kept as a small thumbnail and decoded once per song instead of on every update.
+- the settings window frees its memory when you close it.
+- the time labels no longer animate every second, which was a big part of the growth.
+- the app is built for size: 1.7 mb down to 650 kb, and the download from 504 kb to about 360 kb.
+
 ## 0.1.2
 
 a fix for stale artwork.
