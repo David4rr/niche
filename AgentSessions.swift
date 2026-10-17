@@ -417,14 +417,16 @@ struct AgentSessionRow: View {
 
 struct AgentClosedView: View {
     let monitor: AgentMonitor
+    @State private var lastSessions: [AgentSession] = []
 
     var body: some View {
-        let live = AgentKind.allCases.filter { !monitor.sessions(of: $0).isEmpty }
-        let working = monitor.sessions.filter { $0.state == .working }.count
+        let sessions = monitor.isEmpty ? lastSessions : monitor.sessions
+        let live = AgentKind.allCases.filter { kind in sessions.contains { $0.kind == kind } }
+        let working = sessions.filter { $0.state == .working }.count
         HStack(spacing: 0) {
             HStack(spacing: 7) {
                 ForEach(live, id: \.self) { kind in
-                    AgentIndicator(kind: kind, sessions: monitor.sessions(of: kind))
+                    AgentIndicator(kind: kind, sessions: sessions.filter { $0.kind == kind })
                         .transition(.scale(scale: 0.5).combined(with: .opacity))
                 }
             }
@@ -432,12 +434,16 @@ struct AgentClosedView: View {
             Spacer(minLength: 0)
             HStack(spacing: 4) {
                 StatusDot(working: working > 0)
-                Text("\(working > 0 ? working : monitor.sessions.count)")
+                Text("\(working > 0 ? working : sessions.count)")
                     .font(.system(size: 12, weight: .semibold).monospacedDigit())
                     .foregroundStyle(.white.opacity(0.85))
                     .contentTransition(.numericText())
             }
             .frame(width: MusicClosedView.slot)
+        }
+        .onAppear { lastSessions = monitor.sessions }
+        .onChange(of: monitor.sessions) { _, sessions in
+            if !sessions.isEmpty { lastSessions = sessions }
         }
     }
 }

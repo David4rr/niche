@@ -13,6 +13,7 @@ a dynamic island for the mac notch.
 - feature switcher: flip between music and agents
 - lock screen padlock that springs open on unlock
 - settings with a pane per feature
+- updates from github releases, with what changed
 
 ## build
 

@@ -1,0 +1,19 @@
+# changelog
+
+## 0.1.1
+
+smoother notch when things come and go.
+
+- the notch now grows when music or an agent shows up, and shrinks back when it ends, evenly from the middle instead of jumping between sizes.
+- the artwork and agent marks blur in and out with it instead of vanishing on the spot.
+
+## 0.1.0
+
+first release. niche turns the notch into a small dynamic island.
+
+- music: artwork, title, controls and a seek bar, with waveform bars beside the notch. bars that follow the actual audio are optional.
+- agents: running claude code and omp sessions show up with whether they are working or waiting on you. click one to jump to its tmux pane and terminal tab.
+- switch between music and agents from the right side of the open notch.
+- a padlock sits by the notch on the lock screen and opens when you unlock.
+- settings have a page per feature.
+- updates show up in settings with what changed, and install in one click.

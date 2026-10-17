@@ -7,7 +7,7 @@ struct SettingsView: View {
     @State private var pane: Pane? = .general
 
     enum Pane: String, CaseIterable, Identifiable {
-        case general = "General", music = "Music", agents = "Agents", lockScreen = "Lock Screen"
+        case general = "General", music = "Music", agents = "Agents", lockScreen = "Lock Screen", updates = "Updates"
         var id: Self { self }
         var symbol: String {
             switch self {
@@ -15,6 +15,7 @@ struct SettingsView: View {
             case .music: "music.note"
             case .agents: "sparkles"
             case .lockScreen: "lock.fill"
+            case .updates: "arrow.down.circle.fill"
             }
         }
         var tint: Color {
@@ -23,6 +24,7 @@ struct SettingsView: View {
             case .music: Color(red: 1, green: 0.42, blue: 0.55)
             case .agents: Color(red: 0.72, green: 0.5, blue: 0.95)
             case .lockScreen: .blue
+            case .updates: .green
             }
         }
     }
@@ -39,6 +41,7 @@ struct SettingsView: View {
                         .frame(width: 22, height: 22)
                         .background(RoundedRectangle(cornerRadius: 6).fill(pane.tint.gradient))
                 }
+                .badge(pane == .updates && lab.updater.phase == .available ? 1 : 0)
             }
             .navigationSplitViewColumnWidth(180)
         } detail: {
@@ -48,6 +51,7 @@ struct SettingsView: View {
                 case .music: music
                 case .agents: agents
                 case .lockScreen: lockScreen
+                case .updates: updates
                 }
             }
             .formStyle(.grouped)
@@ -122,6 +126,44 @@ struct SettingsView: View {
             Toggle("Show lock indicator", isOn: $lab.showLockIndicator)
         } footer: {
             Text("A padlock sits beside the notch on the lock screen and springs open when you unlock.")
+        }
+    }
+
+    private var updates: some View {
+        let updater = lab.updater
+        return Group {
+            Section {
+                LabeledContent("Installed", value: updater.current)
+                LabeledContent("Status") {
+                    HStack(spacing: 8) {
+                        switch updater.phase {
+                        case .idle, .checking: ProgressView().controlSize(.small)
+                        case .upToDate: Text("Up to date").foregroundStyle(.secondary)
+                        case .available: Text("\(updater.latest?.version ?? "") available").foregroundStyle(.green)
+                        case .installing: Text("Installing…").foregroundStyle(.secondary)
+                        case .failed(let reason): Text(reason).foregroundStyle(.orange).lineLimit(2)
+                        }
+                        Button("Check now") { Task { await updater.check() } }
+                            .disabled(updater.phase == .checking || updater.phase == .installing)
+                    }
+                }
+            } footer: {
+                Text("Niche checks GitHub for a new release on launch and every six hours.")
+            }
+            if let release = updater.latest {
+                Section(updater.phase == .available ? "What's new in \(release.version)" : "Latest release, \(release.version)") {
+                    Text(LocalizedStringKey(release.notes ?? "No notes for this release."))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if updater.phase == .available || updater.phase == .installing {
+                        Button(updater.phase == .installing ? "Installing…" : "Install and restart") {
+                            Task { await updater.install() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(updater.phase == .installing)
+                    }
+                }
+            }
         }
     }
 }

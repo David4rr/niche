@@ -31,6 +31,7 @@ final class LabState {
     let controller = NotchController()
     let player = MusicPlayer()
     let agents = AgentMonitor()
+    let updater = Updater()
     enum Feature: CaseIterable { case music, agents }
     var selectedFeature: Feature?
     var selectedAgent: AgentKind?
@@ -165,6 +166,7 @@ final class LabState {
 
 struct NicheView: View {
     let lab: LabState
+    @State private var closedFeature = LabState.Feature.music
 
     var body: some View {
         let c = lab.controller
@@ -201,15 +203,15 @@ struct NicheView: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.6, anchor: .leading)))
                 } else {
                     Group {
-                        if lab.shownFeature == .agents {
+                        if closedFeature == .agents {
                             AgentClosedView(monitor: lab.agents)
                         } else {
                             MusicClosedView(player: lab.player)
                         }
                     }
                         .frame(width: LabState.closedSize(hasContent: true).width, height: LabState.hardwareNotch.height)
-                        .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.25)),
-                                                removal: .opacity.animation(.easeOut(duration: 0.08))))
+                        .modifier(ClosedContentFade(isShown: lab.hasClosedContent))
+                        .transition(Self.closedContentTransition)
                 }
                 NotchShape(topCornerRadius: radii.top, bottomCornerRadius: radii.bottom)
                     .stroke(LinearGradient(stops: [.init(color: .white.opacity(0.28), location: 0),
@@ -222,7 +224,6 @@ struct NicheView: View {
                     .allowsHitTesting(false)
             }
             .frame(width: outlineWidth, height: size.height, alignment: .top)
-            .animation(.spring(Spring(duration: 0.4, bounce: 0.25), blendDuration: 0), value: lab.hasClosedContent)
             .clipShape(NotchShape(topCornerRadius: radii.top, bottomCornerRadius: radii.bottom))
             .background {
                 NotchShape(topCornerRadius: radii.top, bottomCornerRadius: radii.bottom)
@@ -234,6 +235,9 @@ struct NicheView: View {
             .contentShape(Rectangle())
             .onHover { lab.hover($0) }
             .onChange(of: lab.hasOpenableContent) { _, has in if !has { lab.setOpen(false) } }
+            .onChange(of: lab.shownFeature, initial: true) { _, feature in
+                if let feature { closedFeature = feature }
+            }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
@@ -251,7 +255,19 @@ struct NicheView: View {
             Spacer(minLength: 0)
         }
         .frame(width: LabState.openSize.width + 80, height: LabState.openSize.height + 60)
+        .animation(closedResize, value: lab.hasClosedContent)
     }
+
+    private var closedResize: Animation {
+        lab.hasClosedContent
+            ? .spring(Spring(duration: 0.5, bounce: 0.32), blendDuration: 0)
+            : .spring(response: 0.45, dampingFraction: 0.95)
+    }
+
+    private static let closedContentTransition = AnyTransition.asymmetric(
+        insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.25)),
+        removal: .opacity.animation(.easeOut(duration: 0.1))
+    )
 
     private var ears: some View {
         HStack(spacing: 4) {
@@ -294,6 +310,20 @@ struct NicheView: View {
         }
         .padding(.horizontal, 16 + 12)
         .frame(height: LabState.hardwareNotch.height)
+    }
+}
+
+struct ClosedContentFade: ViewModifier {
+    let isShown: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(isShown ? 1 : 0)
+            .scaleEffect(isShown ? 1 : 0.75)
+            .blur(radius: isShown ? 0 : 4)
+            .animation(isShown ? .spring(response: 0.45, dampingFraction: 0.9).delay(0.18)
+                               : .spring(response: 0.45, dampingFraction: 0.95),
+                       value: isShown)
     }
 }
 
@@ -394,6 +424,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         lab.player.start()
         lab.agents.start()
+        lab.updater.start()
         for sig in [SIGTERM, SIGINT] {
             signal(sig, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)

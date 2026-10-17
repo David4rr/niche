@@ -478,10 +478,12 @@ struct MusicExpandedView: View {
 struct MusicClosedView: View {
     let player: MusicPlayer
     static let slot: CGFloat = 42
+    @State private var lastTrack: Track?
 
     var body: some View {
-        if let track = player.track {
-            HStack(spacing: 0) {
+        let shown = player.track ?? lastTrack
+        HStack(spacing: 0) {
+            if let track = shown {
                 ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: 7)
                     .frame(width: 26, height: 26)
                     .frame(width: Self.slot)
@@ -489,6 +491,10 @@ struct MusicClosedView: View {
                 WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 3.5, maxHeight: 16)
                     .frame(width: Self.slot)
             }
+        }
+        .onAppear { lastTrack = player.track }
+        .onChange(of: player.track) { _, track in
+            if let track { lastTrack = track }
         }
     }
 }
