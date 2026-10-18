@@ -8,7 +8,7 @@
 
 music, your ai agents and little system moments, living right where the camera is.
 
-[**download for mac**](https://github.com/raihanadf/niche/releases/latest/download/Niche.dmg) · [what's new](CHANGELOG.md)
+[**download for mac**](https://github.com/raihanadf/niche/releases/latest/download/Niche.dmg) · [website](https://niche.iblameraihan.com) · [what's new](CHANGELOG.md)
 
 <sub>free · macos 15 or later · macbooks with a notch</sub>
 
