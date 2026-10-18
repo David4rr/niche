@@ -1,5 +1,10 @@
 # changelog
 
+## 0.5.5
+
+- without a notch picture, the closed agent view is back to its usual look: the agent marks on the left, one working or waiting dot and the count on the right, at the normal width.
+- with a picture set, it stays as in 0.5.4: the picture on the left, each agent with its own dot on the right.
+
 ## 0.5.4
 
 - the notch picture now sits exactly like the song artwork: 24 pt, with the same 5 pt gap on the left and underneath.
