@@ -1,5 +1,12 @@
 # changelog
 
+## 0.3.7
+
+a padlock that clicks.
+
+- on unlock the padlock ducks, the shackle pops up with a spring and swings open to the side. on lock it swings back and snaps shut with a small bounce.
+- the padlock is back to the size of the system lock icon.
+
 ## 0.3.6
 
 a smoother padlock.

@@ -168,7 +168,7 @@ final class LabState {
         guard lockState == .locked else { return }
         withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) { lockState = .unlocking }
         unlockTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(0.8))
+            try? await Task.sleep(for: .seconds(1.1))
             guard !Task.isCancelled, let self else { return }
             withAnimation(.easeOut(duration: 0.3)) { self.lockShown = false }
             try? await Task.sleep(for: .seconds(0.3))
@@ -418,31 +418,55 @@ struct FeatureLogo: View {
 struct LockIndicator: View {
     let state: LabState.LockState
     let isShown: Bool
-    @State private var latched = false
+    @State private var lift: CGFloat = 2
+    @State private var shift: CGFloat = 3
+    @State private var squash: CGFloat = 1
 
     var body: some View {
-        let open = state == .unlocking || !latched
         HStack(spacing: 0) {
             ZStack(alignment: .bottom) {
                 Shackle()
-                    .stroke(.white, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                    .frame(width: 8, height: 8)
-                    .rotationEffect(.degrees(open ? -18 : 0), anchor: .bottomTrailing)
-                    .offset(y: open ? -10 : -5.5)
-                RoundedRectangle(cornerRadius: 2.5)
+                    .stroke(.white, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                    .frame(width: 6.5, height: 6.5)
+                    .offset(x: shift, y: -4.5 - lift)
+                RoundedRectangle(cornerRadius: 2)
                     .fill(.white)
-                    .frame(width: 12, height: 9)
+                    .frame(width: 9.5, height: 7)
+                    .scaleEffect(x: 2 - squash, y: squash, anchor: .bottom)
             }
-            .frame(width: 14, height: 18, alignment: .bottom)
+            .frame(width: 14, height: 13, alignment: .bottom)
             .frame(width: MusicClosedView.slot)
             Spacer(minLength: 0)
         }
         .opacity(isShown ? 1 : 0)
         .blur(radius: isShown ? 0 : 6)
         .scaleEffect(isShown ? 1 : 0.85, anchor: .leading)
-        .onAppear {
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.7).delay(0.15)) { latched = true }
+        .task { await latch() }
+        .onChange(of: state) { _, state in
+            if state == .unlocking { Task { await unlatch() } }
         }
+    }
+
+    private func latch() async {
+        try? await Task.sleep(for: .seconds(0.12))
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) { shift = 0 }
+        try? await Task.sleep(for: .seconds(0.15))
+        withAnimation(.spring(response: 0.2, dampingFraction: 0.5)) { lift = 0 }
+        try? await Task.sleep(for: .seconds(0.06))
+        withAnimation(.easeOut(duration: 0.05)) { squash = 0.88 }
+        try? await Task.sleep(for: .seconds(0.05))
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.45)) { squash = 1 }
+    }
+
+    private func unlatch() async {
+        withAnimation(.easeOut(duration: 0.06)) { squash = 0.88 }
+        try? await Task.sleep(for: .seconds(0.06))
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.4)) {
+            squash = 1
+            lift = 2.5
+        }
+        try? await Task.sleep(for: .seconds(0.1))
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.55)) { shift = 3 }
     }
 }
 
