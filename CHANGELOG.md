@@ -1,5 +1,9 @@
 # changelog
 
+## 0.5.1
+
+- the song artwork in the closed notch sits a little further in from the edge, 6 pt instead of 4.
+
 ## 0.5.0
 
 a picture for the empty notch.

@@ -524,7 +524,7 @@ struct MusicClosedView: View {
                 // bottom corner at that inset so the two curves run parallel
                 ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: 7)
                     .frame(width: 24, height: 24)
-                    .padding(.leading, 4)
+                    .padding(.leading, 6)
                     .frame(width: Self.slot, alignment: .leading)
                 Spacer(minLength: 0)
                 WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)
