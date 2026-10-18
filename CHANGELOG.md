@@ -1,5 +1,12 @@
 # changelog
 
+## 0.6.2
+
+brightness fix.
+
+- the brightness keys go back to macOS. niche used to set the screen brightness itself, which jumped instead of fading, and macOS could then fade it back to its own level, which could leave the screen stuck dark. now brightness fades smoothly and stays where you put it.
+- the notch still shows the brightness change. macOS may show its own brightness popup again; the volume popup is still replaced.
+
 ## 0.6.1
 
 - the feature switcher animates now: the front circle hops and slides to the back while the next one comes forward.

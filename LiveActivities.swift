@@ -64,8 +64,6 @@ final class LiveActivityCenter {
     @ObservationIgnored private var audioListeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
     @ObservationIgnored private let registerBrightness: @convention(c) (UInt32, UnsafeRawPointer?, CFNotificationCallback) -> Int32
     @ObservationIgnored private let unregisterBrightness: @convention(c) (UInt32, UnsafeRawPointer?) -> Int32
-    @ObservationIgnored private let getBrightness: @convention(c) (UInt32, UnsafeMutablePointer<Float>) -> Int32
-    @ObservationIgnored private let setBrightness: @convention(c) (UInt32, Float) -> Int32
     @ObservationIgnored private var keyTap: CFMachPort?
     @ObservationIgnored private var keyTapSource: CFRunLoopSource?
 
@@ -81,15 +79,11 @@ final class LiveActivityCenter {
         enabled = Set(Kind.allCases.filter { defaults.bool(forKey: "liveActivity.\($0.rawValue)") })
         guard let handle = dlopen("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices", RTLD_NOW),
               let register = dlsym(handle, "DisplayServicesRegisterForBrightnessChangeNotifications"),
-              let unregister = dlsym(handle, "DisplayServicesUnregisterForBrightnessChangeNotifications"),
-              let get = dlsym(handle, "DisplayServicesGetBrightness"),
-              let set = dlsym(handle, "DisplayServicesSetBrightness") else {
+              let unregister = dlsym(handle, "DisplayServicesUnregisterForBrightnessChangeNotifications") else {
             fatalError("DisplayServices brightness symbols not found")
         }
         registerBrightness = unsafeBitCast(register, to: (@convention(c) (UInt32, UnsafeRawPointer?, CFNotificationCallback) -> Int32).self)
         unregisterBrightness = unsafeBitCast(unregister, to: (@convention(c) (UInt32, UnsafeRawPointer?) -> Int32).self)
-        getBrightness = unsafeBitCast(get, to: (@convention(c) (UInt32, UnsafeMutablePointer<Float>) -> Int32).self)
-        setBrightness = unsafeBitCast(set, to: (@convention(c) (UInt32, Float) -> Int32).self)
         Self.shared = self
     }
 
@@ -163,7 +157,7 @@ final class LiveActivityCenter {
         isKeyTapActive = false
         if let current, !watching(current.kind) { hide() }
 
-        if replacesSystemHUD && (watching(.volume) || watching(.brightness)) { startKeyTap() }
+        if replacesSystemHUD && watching(.volume) { startKeyTap() }
 
         if watching(.capsLock) {
             readCaps()
@@ -184,7 +178,7 @@ final class LiveActivityCenter {
         if watching(.volume) { watchVolume() }
     }
 
-    private enum MediaKey { case volumeUp, volumeDown, mute, brightnessUp, brightnessDown }
+    private enum MediaKey { case volumeUp, volumeDown, mute }
 
     private func startKeyTap() {
         guard AXIsProcessTrusted() else {
@@ -219,34 +213,23 @@ final class LiveActivityCenter {
             if let keyTap { CGEvent.tapEnable(tap: keyTap, enable: true) }
             return false
         }
+        // only the volume keys are taken over. brightness keys always go to macOS: setting the panel
+        // directly isn't smooth, and macOS fades it back to its own target afterwards, which can leave
+        // the screen stuck dark. niche still shows the change from the brightness notification
+        guard type.rawValue == 14, watching(.volume), let ns = NSEvent(cgEvent: event), ns.subtype.rawValue == 8 else { return false }
+        let data = ns.data1
+        let isDown = (data & 0xFF00) >> 8 == 0xA
         let key: MediaKey
-        let isDown: Bool
-        if type.rawValue == 14 {
-            guard let ns = NSEvent(cgEvent: event), ns.subtype.rawValue == 8 else { return false }
-            let data = ns.data1
-            isDown = (data & 0xFF00) >> 8 == 0xA
-            switch (data & 0xFFFF0000) >> 16 {
-            case 0: key = .volumeUp
-            case 1: key = .volumeDown
-            case 7: key = .mute
-            case 2: key = .brightnessUp
-            case 3: key = .brightnessDown
-            default: return false
-            }
-        } else {
-            switch event.getIntegerValueField(.keyboardEventKeycode) {
-            case 144: key = .brightnessUp
-            case 145: key = .brightnessDown
-            default: return false
-            }
-            isDown = type == .keyDown
+        switch (data & 0xFFFF0000) >> 16 {
+        case 0: key = .volumeUp
+        case 1: key = .volumeDown
+        case 7: key = .mute
+        default: return false
         }
-        let isVolume = key == .volumeUp || key == .volumeDown || key == .mute
-        guard watching(isVolume ? .volume : .brightness) else { return false }
         let fine = event.flags.contains(.maskShift) && event.flags.contains(.maskAlternate)
         let step: Float = fine ? 1.0 / 64 : 1.0 / 16
         guard isDown else { return true }
-        return isVolume ? changeVolume(key, step: step) : changeBrightness(up: key == .brightnessUp, step: step)
+        return changeVolume(key, step: step)
     }
 
     private func changeVolume(_ key: MediaKey, step: Float) -> Bool {
@@ -280,14 +263,6 @@ final class LiveActivityCenter {
             AudioObjectSetPropertyData(device, &mute, 0, nil, UInt32(MemoryLayout<UInt32>.size), &muted)
         }
         return AudioObjectSetPropertyData(device, &volume, 0, nil, size, &level) == noErr
-    }
-
-    private func changeBrightness(up: Bool, step: Float) -> Bool {
-        let display = CGMainDisplayID()
-        var level: Float = 0
-        guard getBrightness(display, &level) == 0 else { return false }
-        level = min(max(((level + (up ? step : -step)) / step).rounded() * step, 0), 1)
-        return setBrightness(display, level) == 0
     }
 
     private func readCaps() {
