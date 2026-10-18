@@ -1,5 +1,9 @@
 # changelog
 
+## 0.3.5.1
+
+- the brightness sun now grows with the level: its rays light up one by one and get longer, sliding smoothly like the volume icon.
+
 ## 0.3.5
 
 smoother live activities.

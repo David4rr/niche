@@ -484,7 +484,7 @@ struct LiveActivityView: View {
         case .volume:
             symbol(activity.isOn ? "speaker.wave.3.fill" : "speaker.slash.fill", tint: .white, value: activity.isOn ? activity.level : 1)
         case .brightness:
-            symbol("sun.max.fill", tint: .yellow, value: activity.level)
+            SunGlyph(level: activity.level)
         case .lowBattery:
             symbol(activity.level <= 0.1 ? "battery.0percent" : "battery.25percent", tint: .red)
         case .charging:
@@ -528,6 +528,27 @@ struct LiveActivityView: View {
             .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(tint)
             .contentTransition(.symbolEffect(.replace))
+    }
+}
+
+private struct SunGlyph: View {
+    let level: Double
+
+    var body: some View {
+        let level = min(max(level, 0), 1)
+        ZStack {
+            Circle().frame(width: 6 + 1.5 * level, height: 6 + 1.5 * level)
+            ForEach(0..<8, id: \.self) { i in
+                Capsule()
+                    .frame(width: 1.8, height: 1.6 + 2.4 * level)
+                    .offset(y: -(6 + 1.9 * level))
+                    .rotationEffect(.degrees(Double(i) * 45))
+                    .opacity(min(max(level * 8 - Double(i), 0.3), 1))
+            }
+        }
+        .foregroundStyle(.yellow)
+        .frame(width: 18, height: 18)
+        .animation(.smooth(duration: 0.25), value: level)
     }
 }
 
