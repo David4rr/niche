@@ -520,11 +520,12 @@ struct MusicClosedView: View {
         let shown = player.track ?? lastTrack
         HStack(spacing: 0) {
             if let track = shown {
-                // 24 pt leaves 4 pt above and below in the 32 pt notch; the radius follows the notch's
-                // bottom corner at that inset so the two curves run parallel
+                // 5 pt from the notch edge and, lifted 1 pt, 5 pt from the bottom too (the top gap hides in
+                // the bezel anyway); the radius follows the notch's bottom corner at that inset
                 ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: 7)
                     .frame(width: 24, height: 24)
-                    .padding(.leading, 6)
+                    .offset(y: -1)
+                    .padding(.leading, 5)
                     .frame(width: Self.slot, alignment: .leading)
                 Spacer(minLength: 0)
                 WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)

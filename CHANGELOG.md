@@ -1,5 +1,9 @@
 # changelog
 
+## 0.5.2
+
+- the song artwork in the closed notch now has the same gap on the left and underneath, 5 pt each.
+
 ## 0.5.1
 
 - the song artwork in the closed notch sits a little further in from the edge, 6 pt instead of 4.
