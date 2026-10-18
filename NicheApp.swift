@@ -36,6 +36,7 @@ final class LabState {
     enum Feature: CaseIterable { case music, agents }
     var selectedFeature: Feature?
     var selectedAgent: AgentKind?
+    var peekFeature: Feature?
     @ObservationIgnored private var unlockTask: Task<Void, Never>?
     @ObservationIgnored private var pulseTask: Task<Void, Never>?
 
@@ -105,26 +106,32 @@ final class LabState {
         return activeFeatures.first
     }
 
+    var openFeature: Feature? {
+        if let feature = peekFeature, activeFeatures.contains(feature) { return feature }
+        return shownFeature
+    }
+
     var upcomingFeatures: [Feature] {
         let live = activeFeatures
-        guard let current = shownFeature, let index = live.firstIndex(of: current) else { return [] }
+        guard let current = openFeature, let index = live.firstIndex(of: current) else { return [] }
         return (1..<live.count).map { live[(index + $0) % live.count] }
     }
 
     func switchFeature() {
         guard let next = upcomingFeatures.first else { return }
+        peekFeature = nil
         selectedFeature = next
     }
 
     var shownAgent: AgentKind? {
-        guard shownFeature == .agents else { return nil }
+        guard openFeature == .agents else { return nil }
         if let kind = selectedAgent, !agents.sessions(of: kind).isEmpty { return kind }
         return AgentKind.allCases.first { !agents.sessions(of: $0).isEmpty }
     }
 
     func showAgent(_ kind: AgentKind) {
         selectedAgent = kind
-        selectedFeature = .agents
+        peekFeature = .agents
         setOpen(true)
     }
 
@@ -171,6 +178,7 @@ final class LabState {
         } else {
             c.collapse()
             selectedAgent = nil
+            peekFeature = nil
             Task {
                 try? await Task.sleep(for: .seconds(1.5))
                 malloc_zone_pressure_relief(nil, 0)
@@ -330,7 +338,7 @@ struct NicheView: View {
             }
             if lab.shownAgent != nil { Spacer(minLength: 0) }
             let upcoming = lab.upcomingFeatures
-            if !upcoming.isEmpty, let current = lab.shownFeature {
+            if !upcoming.isEmpty, let current = lab.openFeature {
                 let stack = upcoming + [current]
                 Button {
                     withAnimation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0)) { lab.switchFeature() }

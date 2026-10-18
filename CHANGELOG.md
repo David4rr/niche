@@ -1,5 +1,12 @@
 # changelog
 
+## 0.3.3
+
+agent marks peek instead of switching.
+
+- clicking an agent mark in the open notch shows its sessions just for that look. move away and the notch goes back to what it was showing, music stays music.
+- only the feature switcher on the right changes what the notch shows.
+
 ## 0.3.2
 
 a new icon.
