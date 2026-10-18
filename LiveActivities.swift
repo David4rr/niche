@@ -64,6 +64,7 @@ final class LiveActivityCenter {
     @ObservationIgnored private var audioListeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
     @ObservationIgnored private let registerBrightness: @convention(c) (UInt32, UnsafeRawPointer?, CFNotificationCallback) -> Int32
     @ObservationIgnored private let unregisterBrightness: @convention(c) (UInt32, UnsafeRawPointer?) -> Int32
+    @ObservationIgnored private let smoothBrightness: @convention(c) (UInt32, Float) -> Int32
     @ObservationIgnored private var keyTap: CFMachPort?
     @ObservationIgnored private var keyTapSource: CFRunLoopSource?
 
@@ -79,11 +80,14 @@ final class LiveActivityCenter {
         enabled = Set(Kind.allCases.filter { defaults.bool(forKey: "liveActivity.\($0.rawValue)") })
         guard let handle = dlopen("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices", RTLD_NOW),
               let register = dlsym(handle, "DisplayServicesRegisterForBrightnessChangeNotifications"),
-              let unregister = dlsym(handle, "DisplayServicesUnregisterForBrightnessChangeNotifications") else {
+              let unregister = dlsym(handle, "DisplayServicesUnregisterForBrightnessChangeNotifications"),
+              let smooth = dlsym(handle, "DisplayServicesSetBrightnessSmooth") else {
             fatalError("DisplayServices brightness symbols not found")
         }
         registerBrightness = unsafeBitCast(register, to: (@convention(c) (UInt32, UnsafeRawPointer?, CFNotificationCallback) -> Int32).self)
         unregisterBrightness = unsafeBitCast(unregister, to: (@convention(c) (UInt32, UnsafeRawPointer?) -> Int32).self)
+        // takes a change, not a target: (display, delta) adds delta to the current level
+        smoothBrightness = unsafeBitCast(smooth, to: (@convention(c) (UInt32, Float) -> Int32).self)
         Self.shared = self
     }
 
@@ -157,7 +161,7 @@ final class LiveActivityCenter {
         isKeyTapActive = false
         if let current, !watching(current.kind) { hide() }
 
-        if replacesSystemHUD && watching(.volume) { startKeyTap() }
+        if replacesSystemHUD && (watching(.volume) || watching(.brightness)) { startKeyTap() }
 
         if watching(.capsLock) {
             readCaps()
@@ -178,7 +182,7 @@ final class LiveActivityCenter {
         if watching(.volume) { watchVolume() }
     }
 
-    private enum MediaKey { case volumeUp, volumeDown, mute }
+    private enum MediaKey { case volumeUp, volumeDown, mute, brightnessUp, brightnessDown }
 
     private func startKeyTap() {
         guard AXIsProcessTrusted() else {
@@ -213,22 +217,37 @@ final class LiveActivityCenter {
             if let keyTap { CGEvent.tapEnable(tap: keyTap, enable: true) }
             return false
         }
-        // only the volume keys are taken over. brightness keys always go to macOS: setting the panel
-        // directly isn't smooth, and macOS fades it back to its own target afterwards, which can leave
-        // the screen stuck dark. niche still shows the change from the brightness notification
-        guard type.rawValue == 14, watching(.volume), let ns = NSEvent(cgEvent: event), ns.subtype.rawValue == 8 else { return false }
-        let data = ns.data1
-        let isDown = (data & 0xFF00) >> 8 == 0xA
         let key: MediaKey
-        switch (data & 0xFFFF0000) >> 16 {
-        case 0: key = .volumeUp
-        case 1: key = .volumeDown
-        case 7: key = .mute
-        default: return false
+        let isDown: Bool
+        if type.rawValue == 14 {
+            guard let ns = NSEvent(cgEvent: event), ns.subtype.rawValue == 8 else { return false }
+            let data = ns.data1
+            isDown = (data & 0xFF00) >> 8 == 0xA
+            switch (data & 0xFFFF0000) >> 16 {
+            case 0: key = .volumeUp
+            case 1: key = .volumeDown
+            case 7: key = .mute
+            case 2: key = .brightnessUp
+            case 3: key = .brightnessDown
+            default: return false
+            }
+        } else {
+            switch event.getIntegerValueField(.keyboardEventKeycode) {
+            case 144: key = .brightnessUp
+            case 145: key = .brightnessDown
+            default: return false
+            }
+            isDown = type == .keyDown
         }
+        let isVolume = key == .volumeUp || key == .volumeDown || key == .mute
+        guard watching(isVolume ? .volume : .brightness) else { return false }
         let fine = event.flags.contains(.maskShift) && event.flags.contains(.maskAlternate)
         let step: Float = fine ? 1.0 / 64 : 1.0 / 16
         guard isDown else { return true }
+        // brightness goes through the same smooth, relative change the brightness keys use, so it fades
+        // and becomes macOS's own level. setting the panel directly (DisplayServicesSetBrightness) jumps,
+        // and macOS fades it back to its old level afterwards, which once left the screen stuck dark
+        if !isVolume { return smoothBrightness(CGMainDisplayID(), key == .brightnessUp ? step : -step) == 0 }
         return changeVolume(key, step: step)
     }
 

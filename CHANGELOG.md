@@ -1,5 +1,10 @@
 # changelog
 
+## 0.6.3
+
+- niche takes over the brightness keys again, so the system brightness popup is gone and only the notch shows the change.
+- brightness now fades smoothly and stays where you put it. niche asks macOS for the same gentle step the brightness keys use, instead of setting the screen directly like before 0.6.2.
+
 ## 0.6.2
 
 brightness fix.

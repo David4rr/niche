@@ -42,7 +42,7 @@ struct OnboardingView: View {
                 TimelineView(.periodic(from: .now, by: 1)) { _ in
                     let trusted = AXIsProcessTrusted()
                     row(symbol: "hand.raised.fill", tint: .blue, title: "Accessibility",
-                        detail: "Replaces the volume popup, pastes from your clipboard history, and opens the right terminal tab for an agent.") {
+                        detail: "Replaces the volume and brightness popups, pastes from your clipboard history, and opens the right terminal tab for an agent.") {
                         if trusted {
                             Label("Allowed", systemImage: "checkmark.circle.fill")
                                 .labelStyle(.titleAndIcon)

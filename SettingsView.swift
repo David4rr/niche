@@ -230,7 +230,7 @@ struct SettingsView: View {
             }
             .disabled(!center.isOn)
             Section {
-                Toggle("Replace the system volume popup",
+                Toggle("Replace the system volume and brightness popups",
                        isOn: Binding(get: { center.replacesSystemHUD }, set: { center.replacesSystemHUD = $0 }))
                 TimelineView(.periodic(from: .now, by: 1)) { _ in
                     let trusted = AXIsProcessTrusted()
@@ -249,7 +249,7 @@ struct SettingsView: View {
                     }
                 }
             } footer: {
-                Text("Niche needs your permission to hide and replace the system volume popup. It takes over the volume keys so only the notch shows the change. Brightness keys stay with macOS, so brightness fades smoothly; the notch shows the change too, and macOS may still show its own brightness popup. Focus has no key to take over, so macOS may still show its own Focus banner.")
+                Text("Niche needs your permission to hide and replace the system volume and brightness popups. It takes over those keys so only the notch shows the change. Focus has no key to take over, so macOS may still show its own Focus banner.")
             }
             .disabled(!center.isOn)
         }
