@@ -473,13 +473,20 @@ final class LiveActivityCenter {
 struct LiveActivityView: View {
     let activity: LiveActivityCenter.Activity
 
+    // the bar is wider than the slot, so the notch grows this much on the right while it shows
+    static let levelRoom: CGFloat = 12
+
     var body: some View {
+        let isLevel = activity.kind == .volume || activity.kind == .brightness
         HStack(spacing: 0) {
             icon
                 .frame(width: MusicClosedView.slot)
             Spacer(minLength: 0)
+            // the icon sits 11 pt from the left edge (16 pt glyph centred in the 38 pt slot); the bar keeps
+            // the same 11 pt from the right edge
             trailing
-                .frame(width: MusicClosedView.slot)
+                .padding(.trailing, isLevel ? 11 : 0)
+                .frame(width: MusicClosedView.slot + (isLevel ? Self.levelRoom : 0), alignment: isLevel ? .trailing : .center)
         }
         .foregroundStyle(.white)
         // the notch's black runs on into the bezel above it, so small glyphs that are centred look low
@@ -588,9 +595,9 @@ private struct LevelBar: View {
         Capsule().fill(.white.opacity(0.2))
             .overlay(alignment: .leading) {
                 Capsule().fill(.white)
-                    .frame(width: 26 * min(max(level, 0), 1))
+                    .frame(width: 34 * min(max(level, 0), 1))
             }
-            .frame(width: 26, height: 5)
+            .frame(width: 34, height: 5)
             .animation(.smooth(duration: 0.25), value: level)
     }
 }

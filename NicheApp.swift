@@ -159,7 +159,7 @@ final class LabState {
         }
         let size = Self.closedSize(hasContent: hasClosedContent)
         let room = agentsRoom
-        return CGSize(width: size.width + room.left + room.right, height: size.height)
+        return CGSize(width: size.width + room.left + room.right + levelRoom, height: size.height)
     }
 
     // room the closed agent view needs past the usual slots, per side. the camera sits in the middle of
@@ -172,10 +172,17 @@ final class LabState {
         return idleArt != nil ? (0, 26) : (10, 0)
     }
 
+    // a volume or brightness bar gets a longer right ear, so its gap to the notch edge matches the icon's
+    var levelRoom: CGFloat {
+        guard !controller.isExpanded, lockState == .none,
+              let kind = liveActivities.current?.kind, kind == .volume || kind == .brightness else { return 0 }
+        return LiveActivityView.levelRoom
+    }
+
     // growing one side only moves the notch's centre off the camera, so it is shifted back by half
     var closedOffset: CGFloat {
         let room = agentsRoom
-        return (room.right - room.left) / 2
+        return (room.right + levelRoom - room.left) / 2
     }
 
     var activeFeatures: [Feature] {
@@ -404,7 +411,7 @@ struct NicheView: View {
                 } else if let activity = lab.liveActivities.current {
                     LiveActivityView(activity: activity)
                         .id(activity.kind)
-                        .frame(width: LabState.closedSize(hasContent: true).width, height: LabState.hardwareNotch.height)
+                        .frame(width: LabState.closedSize(hasContent: true).width + lab.levelRoom, height: LabState.hardwareNotch.height)
                         .drawingGroup()
                         .modifier(ActivityFade(isShown: lab.liveActivities.isShowing))
                         .transition(Self.activityTransition)

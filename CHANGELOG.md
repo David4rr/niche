@@ -1,5 +1,9 @@
 # changelog
 
+## 0.5.9
+
+- the volume and brightness bar is longer, and the notch grows a little on the right while it shows, so the bar sits as far from the right edge as the icon does from the left.
+
 ## 0.5.8
 
 - the open padlock is more compact: its shackle is shorter and narrower once it swings open, and pops up less, so the unlocked lock is about the same size as the locked one.
