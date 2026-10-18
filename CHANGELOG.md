@@ -1,5 +1,12 @@
 # changelog
 
+## 0.4.1
+
+lighter clipboard.
+
+- copied images, file icons and app icons are now kept as small pictures drawn once, instead of the full image being kept and redrawn every time the clipboard opens.
+- memory: about 21 mb right after launch. the first time the notch opens it settles around 33 mb with a full history, and then stays there however often you open it.
+
 ## 0.4.0
 
 clipboard.

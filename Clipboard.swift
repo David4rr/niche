@@ -102,10 +102,10 @@ final class ClipboardHistory {
 
     private func read(_ board: NSPasteboard) -> Item? {
         let front = NSWorkspace.shared.frontmostApplication
-        let app = front?.icon, appName = front?.localizedName
+        let app = front?.icon.map { Self.thumbnail($0, side: 40) }, appName = front?.localizedName
         if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
             let names = urls.map(\.lastPathComponent).joined(separator: ", ")
-            return Item(kind: .files, text: names, image: nil, imageData: nil, imageType: nil, files: urls,
+            return Item(kind: .files, text: names, image: Self.thumbnail(NSWorkspace.shared.icon(forFile: urls[0].path), side: 96), imageData: nil, imageType: nil, files: urls,
                         app: app, appName: appName, signature: urls.hashValue)
         }
         if let string = board.string(forType: .string), !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -123,7 +123,7 @@ final class ClipboardHistory {
         }
         for type in [NSPasteboard.PasteboardType.png, .tiff] {
             guard let data = board.data(forType: type), data.count <= Self.maxImageBytes, let image = NSImage(data: data) else { continue }
-            return Item(kind: .image, text: "Image \(Int(image.size.width)) × \(Int(image.size.height))", image: Self.thumbnail(image),
+            return Item(kind: .image, text: "Image \(Int(image.size.width)) × \(Int(image.size.height))", image: Self.thumbnail(image, side: 128),
                         imageData: data, imageType: type, files: [], app: app, appName: appName, signature: data.hashValue)
         }
         return nil
@@ -169,16 +169,22 @@ final class ClipboardHistory {
         selection = 0
     }
 
-    // tiles and the copy glance are at most 64 pt, so only a small bitmap is kept on screen; the
-    // original bytes stay in imageData for pasting
-    private static func thumbnail(_ image: NSImage) -> NSImage {
-        let side: CGFloat = 128
-        let scale = side / max(image.size.width, image.size.height, 1)
-        let size = NSSize(width: max(1, image.size.width * min(scale, 1)), height: max(1, image.size.height * min(scale, 1)))
-        return NSImage(size: size, flipped: false) { rect in
-            image.draw(in: rect)
-            return true
-        }
+    // tiles, captions and the copy glance are tiny, so items keep a small bitmap drawn once here. a
+    // drawing-handler image would keep the full original alive and decode it again on every draw
+    static func thumbnail(_ image: NSImage, side: CGFloat) -> NSImage {
+        let scale = min(side / max(image.size.width, image.size.height, 1), 1)
+        let width = max(1, Int(image.size.width * scale)), height = max(1, Int(image.size.height * scale))
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8,
+                                         samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                         bytesPerRow: 0, bitsPerPixel: 0) else { return image }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSGraphicsContext.current?.imageInterpolation = .high
+        image.draw(in: NSRect(x: 0, y: 0, width: width, height: height))
+        NSGraphicsContext.restoreGraphicsState()
+        let small = NSImage(size: NSSize(width: CGFloat(width) / 2, height: CGFloat(height) / 2))
+        small.addRepresentation(rep)
+        return small
     }
 
     static func color(from text: String) -> Color? {
@@ -327,8 +333,8 @@ private struct ClipTile: View {
         case .color:
             (ClipboardHistory.color(from: item.text.trimmingCharacters(in: .whitespacesAndNewlines)) ?? .clear)
         case .files:
-            if let first = item.files.first {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: first.path)).resizable().scaledToFit().padding(7)
+            if let icon = item.image {
+                Image(nsImage: icon).resizable().scaledToFit().padding(7)
             }
         case .link:
             VStack(spacing: 4) {
