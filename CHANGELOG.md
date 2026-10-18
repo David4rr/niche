@@ -1,5 +1,9 @@
 # changelog
 
+## 0.3.7.4
+
+- the padlock's shackle is taller, so it reads as a lock at a glance.
+
 ## 0.3.7.3
 
 - the volume, brightness and lock icons in the notch are smaller, so they sit in proportion with the artwork and the level bar.

@@ -428,7 +428,7 @@ struct LockIndicator: View {
             ZStack(alignment: .bottom) {
                 Shackle()
                     .stroke(.white, style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
-                    .frame(width: 6, height: 6)
+                    .frame(width: 6, height: 8)
                     .rotation3DEffect(.degrees(swing), axis: (x: 0, y: 1, z: 0), anchor: .trailing, perspective: 0)
                     .offset(y: -4.1 - lift)
                 RoundedRectangle(cornerRadius: 1.9)
@@ -436,7 +436,7 @@ struct LockIndicator: View {
                     .frame(width: 8.8, height: 6.6)
                     .scaleEffect(x: 2 - squash, y: squash, anchor: .bottom)
             }
-            .frame(width: 13, height: 12, alignment: .bottom)
+            .frame(width: 13, height: 14, alignment: .bottom)
             .frame(width: MusicClosedView.slot)
             Spacer(minLength: 0)
         }
