@@ -1,5 +1,14 @@
 # changelog
 
+## 0.6.0
+
+one switch.
+
+- the open notch's top row is down to just the feature switcher. the clipboard mark and the claude and omp marks are gone from it.
+- the switcher now cycles through music, agents and the clipboard. music and agents switch for real, so the closed notch follows; the clipboard is still only a peek, and moving away goes back to what you were on.
+- the agents view lists every running session, claude and omp together, each row starting with its agent's mark and its working or waiting dot.
+- ⌃⌘V still opens the clipboard straight away.
+
 ## 0.5.9
 
 - the volume and brightness bar is longer, and the notch grows a little on the right while it shows, so the bar sits as far from the right edge as the icon does from the left.

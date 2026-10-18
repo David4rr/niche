@@ -213,26 +213,6 @@ final class KeyCatcher: NSPanel {
     override func keyDown(with event: NSEvent) { onKey?(event) }
 }
 
-struct ClipboardMark: View {
-    let count: Int
-    let isShown: Bool
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "list.clipboard.fill")
-                .font(.system(size: 10, weight: .semibold))
-            Text("\(count)")
-                .font(.system(size: 10, weight: .bold).monospacedDigit())
-                .contentTransition(.numericText())
-        }
-        .foregroundStyle(.white.opacity(isShown ? 1 : 0.75))
-        .padding(.horizontal, 8)
-        .frame(height: 22)
-        .background(Capsule().fill(.white.opacity(isShown ? 0.18 : 0.06)))
-        .contentShape(Capsule())
-    }
-}
-
 // the whole history at once, two rows of five, so nothing ever needs scrolling. under it, one line
 // shows the full text of the item under the pointer (or picked with the keys)
 struct ClipboardView: View {

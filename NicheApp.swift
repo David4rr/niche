@@ -40,7 +40,6 @@ final class LabState {
     // clipboard is never a closed-notch feature or part of the switcher: it is only peeked at
     enum Feature: CaseIterable { case music, agents, clipboard }
     var selectedFeature: Feature?
-    var selectedAgent: AgentKind?
     var peekFeature: Feature?
     @ObservationIgnored private var unlockTask: Task<Void, Never>?
     @ObservationIgnored var setKeyCapture: ((Bool) -> Void)?
@@ -206,36 +205,25 @@ final class LabState {
         return shownFeature ?? (clipboard.items.isEmpty ? nil : .clipboard)
     }
 
+    // the switcher is the only way between features in the open notch. the clipboard rides along in it,
+    // but only as a peek: it has no closed view, so it never becomes what the notch shows
     var upcomingFeatures: [Feature] {
-        let live = activeFeatures
-        guard let current = openFeature else { return [] }
-        // peeking at the clipboard, the switcher offers every real feature
-        guard let index = live.firstIndex(of: current) else { return live }
+        let live = activeFeatures + (clipboard.items.isEmpty ? [] : [.clipboard])
+        guard let current = openFeature, let index = live.firstIndex(of: current) else { return [] }
         return (1..<live.count).map { live[(index + $0) % live.count] }
     }
 
     func switchFeature() {
         guard let next = upcomingFeatures.first else { return }
-        peekFeature = nil
-        selectedFeature = next
+        if next == .clipboard {
+            peekFeature = .clipboard
+        } else {
+            peekFeature = nil
+            selectedFeature = next
+        }
     }
 
-    var shownAgent: AgentKind? {
-        guard openFeature == .agents else { return nil }
-        if let kind = selectedAgent, !agents.sessions(of: kind).isEmpty { return kind }
-        return AgentKind.allCases.first { !agents.sessions(of: $0).isEmpty }
-    }
 
-    func showAgent(_ kind: AgentKind) {
-        selectedAgent = kind
-        peekFeature = .agents
-        setOpen(true)
-    }
-
-    func showClipboard() {
-        peekFeature = .clipboard
-        setOpen(true)
-    }
 
     // the shortcut opens the clipboard with the keys on it, or closes it again
     func toggleClipboard() {
@@ -352,7 +340,6 @@ final class LabState {
             c.expand()
         } else {
             c.collapse()
-            selectedAgent = nil
             peekFeature = nil
             clipboard.setKeyboard(false)
             setKeyCapture?(false)
@@ -380,8 +367,8 @@ struct NicheView: View {
                     .fill(.black)
                 if c.isExpanded {
                     Group {
-                        if let kind = lab.shownAgent {
-                            AgentSessionList(sessions: lab.agents.sessions(of: kind)) { session in
+                        if lab.openFeature == .agents {
+                            AgentSessionList(sessions: lab.agents.sessions) { session in
                                 lab.agents.focus(session)
                                 lab.setOpen(false)
                             }
@@ -509,36 +496,12 @@ struct NicheView: View {
     }
 
     private var ears: some View {
-        // the camera covers the middle of this row, so marks live in the two ears: clipboard on the
-        // left, agents and the switcher on the right
+        // only the switcher sits up here, in the right ear clear of the camera
         HStack(spacing: 4) {
-            if !lab.clipboard.items.isEmpty {
-                Button { lab.showClipboard() } label: {
-                    ClipboardMark(count: lab.clipboard.items.count, isShown: lab.openFeature == .clipboard)
-                }
-                .buttonStyle(.plain)
-                .transition(.scale(scale: 0.5).combined(with: .opacity))
-            }
             Spacer(minLength: 0)
-            if lab.activeFeatures.contains(.agents) {
-                ForEach(AgentKind.allCases, id: \.self) { kind in
-                    let sessions = lab.agents.sessions(of: kind)
-                    if !sessions.isEmpty {
-                        Button { lab.showAgent(kind) } label: {
-                            AgentIndicator(kind: kind, sessions: sessions)
-                                .frame(width: 24, height: 22)
-                                .background(Capsule().fill(.white.opacity(lab.shownAgent == kind ? 0.18 : 0.06)))
-                                .contentShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .transition(.scale(scale: 0.5).combined(with: .opacity))
-                    }
-                }
-            }
             let upcoming = lab.upcomingFeatures
             if !upcoming.isEmpty, let current = lab.openFeature {
-                // the clipboard has its own mark, so the stack only holds the real features
-                let stack = current == .clipboard ? upcoming : upcoming + [current]
+                let stack = upcoming + [current]
                 Button {
                     withAnimation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0)) { lab.switchFeature() }
                 } label: {
@@ -874,3 +837,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return image
     }
 }
+

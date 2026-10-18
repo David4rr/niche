@@ -402,7 +402,9 @@ struct AgentSessionRow: View {
         let tint = working ? Color.green : Color.orange
         Button(action: action) {
             HStack(spacing: 8) {
-                StatusDot(working: working)
+                // claude and omp share one list, so each row leads with its own mark
+                AgentIndicator(kind: session.kind, sessions: [session])
+                    .frame(width: 16)
                 Text(session.title ?? session.project)
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
