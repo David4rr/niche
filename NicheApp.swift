@@ -232,7 +232,7 @@ struct NicheView: View {
                 } else if lab.lockState != .none {
                     LockIndicator(state: lab.lockState, isShown: lab.lockShown)
                         .frame(width: LabState.closedSize(hasContent: true).width, height: LabState.hardwareNotch.height)
-                        .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2)), removal: .identity))
+                        .transition(.identity)
                 } else if let activity = lab.liveActivities.current {
                     LiveActivityView(activity: activity)
                         .id(activity.kind)
@@ -421,6 +421,7 @@ struct LockIndicator: View {
     @State private var lift: CGFloat = 2
     @State private var swing: Double = 180
     @State private var squash: CGFloat = 1
+    @State private var appeared = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -439,9 +440,9 @@ struct LockIndicator: View {
             .frame(width: MusicClosedView.slot)
             Spacer(minLength: 0)
         }
-        .opacity(isShown ? 1 : 0)
-        .blur(radius: isShown ? 0 : 6)
-        .scaleEffect(isShown ? 1 : 0.85, anchor: .leading)
+        .opacity(isShown && appeared ? 1 : 0)
+        .blur(radius: isShown && appeared ? 0 : 6)
+        .scaleEffect(isShown && appeared ? 1 : 0.85, anchor: .leading)
         .task { await latch() }
         .onChange(of: state) { _, state in
             if state == .unlocking { Task { await unlatch() } }
@@ -449,11 +450,12 @@ struct LockIndicator: View {
     }
 
     private func latch() async {
-        try? await Task.sleep(for: .seconds(0.12))
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { swing = 0 }
-        try? await Task.sleep(for: .seconds(0.15))
-        withAnimation(.spring(response: 0.2, dampingFraction: 0.5)) { lift = 0 }
-        try? await Task.sleep(for: .seconds(0.06))
+        withAnimation(.easeOut(duration: 0.35)) { appeared = true }
+        try? await Task.sleep(for: .seconds(0.55))
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) { swing = 0 }
+        try? await Task.sleep(for: .seconds(0.25))
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.5)) { lift = 0 }
+        try? await Task.sleep(for: .seconds(0.08))
         withAnimation(.easeOut(duration: 0.05)) { squash = 0.88 }
         try? await Task.sleep(for: .seconds(0.05))
         withAnimation(.spring(response: 0.25, dampingFraction: 0.45)) { squash = 1 }
