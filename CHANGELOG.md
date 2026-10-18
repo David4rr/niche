@@ -1,5 +1,10 @@
 # changelog
 
+## 0.5.6
+
+- the claude and omp marks in the closed notch are the same size now, and the status dots sit at the same spot on each.
+- the agent marks no longer crowd the notch's edges. with more than one kind of agent the notch widens a little, with or without a notch picture.
+
 ## 0.5.5
 
 - without a notch picture, the closed agent view is back to its usual look: the agent marks on the left, one working or waiting dot and the count on the right, at the normal width.

@@ -330,13 +330,16 @@ struct AgentGlyph: View {
     var body: some View {
         switch kind {
         case .claude:
+            // the star's symbol runs edge to edge, the π has side bearing; these sizes make them read equal
             Image(systemName: "staroflife.fill")
-                .font(.system(size: size, weight: .bold))
+                .font(.system(size: size * 0.82, weight: .bold))
                 .foregroundStyle(Color(red: 0.85, green: 0.47, blue: 0.34))
+                .frame(width: size, height: size)
         case .omp:
             Text("π")
                 .font(.system(size: size + 3, weight: .heavy, design: .serif))
                 .foregroundStyle(Color(red: 0.55, green: 0.76, blue: 1))
+                .frame(width: size, height: size)
         }
     }
 }
@@ -360,10 +363,10 @@ struct AgentIndicator: View {
     let sessions: [AgentSession]
 
     var body: some View {
-        AgentGlyph(kind: kind, size: 12)
+        AgentGlyph(kind: kind, size: 13)
             .overlay(alignment: .bottomTrailing) {
                 StatusDot(working: sessions.contains { $0.state == .working })
-                    .offset(x: 4, y: 3)
+                    .offset(x: 4, y: 2)
             }
     }
 }
@@ -459,10 +462,9 @@ struct AgentClosedView: View {
                     .transition(.opacity)
                 Spacer(minLength: 0)
                 HStack(spacing: 7) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 10) {
                         ForEach(live, id: \.self) { kind in
                             AgentIndicator(kind: kind, sessions: sessions.filter { $0.kind == kind })
-                                .frame(width: 14, height: 14)
                                 .transition(.scale(scale: 0.5).combined(with: .opacity))
                         }
                     }
@@ -471,20 +473,20 @@ struct AgentClosedView: View {
                 .padding(.trailing, 9)
                 .offset(y: -2)
             } else {
-                HStack(spacing: 7) {
+                HStack(spacing: 8) {
                     ForEach(live, id: \.self) { kind in
                         AgentGlyph(kind: kind, size: 14)
                             .transition(.scale(scale: 0.5).combined(with: .opacity))
                     }
                 }
-                .frame(width: MusicClosedView.slot)
+                .padding(.leading, 10)
                 .offset(y: -2)
                 Spacer(minLength: 0)
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
                     StatusDot(working: working > 0)
                     count
                 }
-                .frame(width: MusicClosedView.slot)
+                .padding(.trailing, 10)
                 .offset(y: -2)
             }
         }

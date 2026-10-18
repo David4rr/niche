@@ -161,12 +161,11 @@ final class LabState {
         return CGSize(width: size.width + agentsRoom, height: size.height)
     }
 
-    // next to a notch picture, the closed agent view gets wider so every agent kind sits side by side
-    // with its own status dot; without a picture the marks share the left slot as before
+    // every agent kind past the first gets room, so marks never crowd the notch's edge
     var agentsRoom: CGFloat {
-        guard idleArt != nil, lockState == .none, liveActivities.current == nil, shownFeature == .agents else { return 0 }
+        guard lockState == .none, liveActivities.current == nil, shownFeature == .agents else { return 0 }
         let kinds = AgentKind.allCases.filter { !agents.sessions(of: $0).isEmpty }.count
-        return CGFloat(max(kinds - 1, 0)) * 2 * 22
+        return CGFloat(max(kinds - 1, 0)) * 2 * 14
     }
 
     var activeFeatures: [Feature] {
