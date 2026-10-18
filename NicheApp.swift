@@ -27,6 +27,7 @@ final class LabState {
     }
     enum LockState { case none, locked, unlocking }
     private(set) var lockState = LockState.none
+    private(set) var lockShown = false
 
     let controller = NotchController()
     let player = MusicPlayer()
@@ -157,16 +158,22 @@ final class LabState {
         unlockTask?.cancel()
         guard showLockIndicator else { return }
         setOpen(false)
-        withAnimation(.spring(Spring(duration: 0.4, bounce: 0.25), blendDuration: 0)) { lockState = .locked }
+        withAnimation(.spring(Spring(duration: 0.4, bounce: 0.2), blendDuration: 0)) {
+            lockState = .locked
+            lockShown = true
+        }
     }
 
     private func screenUnlocked() {
         guard lockState == .locked else { return }
-        withAnimation(.spring(Spring(duration: 0.4, bounce: 0.25), blendDuration: 0)) { lockState = .unlocking }
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) { lockState = .unlocking }
         unlockTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(0.9))
+            try? await Task.sleep(for: .seconds(0.8))
+            guard !Task.isCancelled, let self else { return }
+            withAnimation(.easeOut(duration: 0.3)) { self.lockShown = false }
+            try? await Task.sleep(for: .seconds(0.3))
             guard !Task.isCancelled else { return }
-            withAnimation(.spring(response: 0.4, dampingFraction: 1)) { self?.lockState = .none }
+            withAnimation(.spring(response: 0.4, dampingFraction: 1)) { self.lockState = .none }
         }
     }
 
@@ -223,9 +230,9 @@ struct NicheView: View {
                         .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.12)),
                                                 removal: .opacity.animation(.easeOut(duration: 0.1))))
                 } else if lab.lockState != .none {
-                    LockIndicator(state: lab.lockState)
+                    LockIndicator(state: lab.lockState, isShown: lab.lockShown)
                         .frame(width: LabState.closedSize(hasContent: true).width, height: LabState.hardwareNotch.height)
-                        .transition(.opacity.combined(with: .scale(scale: 0.6, anchor: .leading)))
+                        .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2)), removal: .identity))
                 } else if let activity = lab.liveActivities.current {
                     LiveActivityView(activity: activity)
                         .id(activity.kind)
@@ -410,17 +417,44 @@ struct FeatureLogo: View {
 
 struct LockIndicator: View {
     let state: LabState.LockState
+    let isShown: Bool
+    @State private var latched = false
 
     var body: some View {
+        let open = state == .unlocking || !latched
         HStack(spacing: 0) {
-            Image(systemName: state == .unlocking ? "lock.open.fill" : "lock.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
-                .contentTransition(.symbolEffect(.replace.downUp))
-                .symbolEffect(.bounce.up, value: state == .unlocking)
-                .frame(width: MusicClosedView.slot)
+            ZStack(alignment: .bottom) {
+                Shackle()
+                    .stroke(.white, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .frame(width: 8, height: 8)
+                    .rotationEffect(.degrees(open ? -18 : 0), anchor: .bottomTrailing)
+                    .offset(y: open ? -10 : -5.5)
+                RoundedRectangle(cornerRadius: 2.5)
+                    .fill(.white)
+                    .frame(width: 12, height: 9)
+            }
+            .frame(width: 14, height: 18, alignment: .bottom)
+            .frame(width: MusicClosedView.slot)
             Spacer(minLength: 0)
         }
+        .opacity(isShown ? 1 : 0)
+        .blur(radius: isShown ? 0 : 6)
+        .scaleEffect(isShown ? 1 : 0.85, anchor: .leading)
+        .onAppear {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.7).delay(0.15)) { latched = true }
+        }
+    }
+}
+
+private struct Shackle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let r = rect.width / 2
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + r))
+        path.addArc(center: CGPoint(x: rect.midX, y: rect.minY + r), radius: r, startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false)
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        return path
     }
 }
 

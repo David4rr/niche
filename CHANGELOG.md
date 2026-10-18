@@ -1,5 +1,12 @@
 # changelog
 
+## 0.3.6
+
+a smoother padlock.
+
+- the lock screen padlock is drawn by niche now. on lock it fades in open and its shackle drops shut.
+- on unlock the shackle lifts and swings open, then the padlock blurs away before the music or agents come back, instead of popping between icons.
+
 ## 0.3.5.1
 
 - the brightness sun now grows with the level: its rays light up one by one and get longer, sliding smoothly like the volume icon.
