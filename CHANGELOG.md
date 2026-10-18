@@ -1,5 +1,16 @@
 # changelog
 
+## 0.4.0
+
+clipboard.
+
+- niche now remembers your last 10 copies: text, links, colors, images and files. it shows them in the notch as tiles, all at once, no scrolling. hover a tile to read it in full, click to put it back.
+- press ⌃⌘V anywhere to open it from the keyboard: 1 to 9 picks one, arrows and return work too, and esc closes it. with accessibility allowed, picking pastes straight into the app you were typing in.
+- every copy shows a quick glance in the notch with the app it came from and what was copied, a color shows its swatch and an image its thumbnail.
+- copies stay on your mac, in memory only, and are gone when niche quits. passwords from password managers are skipped.
+- the clipboard has its own pane in settings: how many to remember (3 to 10), the shortcut, paste on pick, and clear history.
+- memory: about 21 mb when idle, about 29 mb with a full history of 10 that includes an image. images keep only a small thumbnail on screen. the download is 2.3 mb.
+
 ## 0.3.7.4
 
 - the padlock's shackle is taller, so it reads as a lock at a glance.

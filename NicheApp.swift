@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 
 @MainActor
@@ -34,11 +35,14 @@ final class LabState {
     let agents = AgentMonitor()
     let updater = Updater()
     let liveActivities = LiveActivityCenter()
-    enum Feature: CaseIterable { case music, agents }
+    let clipboard = ClipboardHistory()
+    // clipboard is never a closed-notch feature or part of the switcher: it is only peeked at
+    enum Feature: CaseIterable { case music, agents, clipboard }
     var selectedFeature: Feature?
     var selectedAgent: AgentKind?
     var peekFeature: Feature?
     @ObservationIgnored private var unlockTask: Task<Void, Never>?
+    @ObservationIgnored var setKeyCapture: ((Bool) -> Void)?
     @ObservationIgnored private var pulseTask: Task<Void, Never>?
 
     init() {
@@ -57,6 +61,11 @@ final class LabState {
             guard let self, self.liveActivities.isEnabled(.agentDone), self.liveActivities.isOn else { return }
             self.liveActivities.agentFinished(session.kind)
         }
+        clipboard.onCopied = { [weak self] item in
+            guard let self, !(self.controller.isExpanded && self.openFeature == .clipboard) else { return }
+            self.liveActivities.copied(icon: item.app, image: item.image, color: Self.color(for: item), symbol: Self.symbol(for: item.kind))
+        }
+        clipboard.onHotKey = { [weak self] in self?.toggleClipboard() }
 
         let center = DistributedNotificationCenter.default()
         center.addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
@@ -86,10 +95,11 @@ final class LabState {
     static let openSize = CGSize(width: hardwareNotch.width + 160, height: 175)
 
     var hasClosedContent: Bool { shownFeature != nil || lockState != .none || liveActivities.current != nil }
-    var hasOpenableContent: Bool { player.track != nil || !agents.isEmpty }
+    var hasOpenableContent: Bool { player.track != nil || !agents.isEmpty || !clipboard.items.isEmpty }
 
     var activityRoom: CGFloat {
-        controller.isExpanded && liveActivities.current != nil && shownAgent == nil ? Self.hardwareNotch.height + 4 - 18 : 0
+        controller.isExpanded && liveActivities.current != nil && openFeature != .agents && openFeature != .clipboard
+            ? Self.hardwareNotch.height + 4 - 18 : 0
     }
 
     var currentSize: CGSize {
@@ -99,7 +109,13 @@ final class LabState {
     }
 
     var activeFeatures: [Feature] {
-        Feature.allCases.filter { $0 == .music ? player.track != nil : !agents.isEmpty }
+        Feature.allCases.filter {
+            switch $0 {
+            case .music: player.track != nil
+            case .agents: !agents.isEmpty
+            case .clipboard: false
+            }
+        }
     }
 
     var shownFeature: Feature? {
@@ -108,13 +124,16 @@ final class LabState {
     }
 
     var openFeature: Feature? {
+        if peekFeature == .clipboard && !clipboard.items.isEmpty { return .clipboard }
         if let feature = peekFeature, activeFeatures.contains(feature) { return feature }
-        return shownFeature
+        return shownFeature ?? (clipboard.items.isEmpty ? nil : .clipboard)
     }
 
     var upcomingFeatures: [Feature] {
         let live = activeFeatures
-        guard let current = openFeature, let index = live.firstIndex(of: current) else { return [] }
+        guard let current = openFeature else { return [] }
+        // peeking at the clipboard, the switcher offers every real feature
+        guard let index = live.firstIndex(of: current) else { return live }
         return (1..<live.count).map { live[(index + $0) % live.count] }
     }
 
@@ -134,6 +153,78 @@ final class LabState {
         selectedAgent = kind
         peekFeature = .agents
         setOpen(true)
+    }
+
+    func showClipboard() {
+        peekFeature = .clipboard
+        setOpen(true)
+    }
+
+    // the shortcut opens the clipboard with the keys on it, or closes it again
+    func toggleClipboard() {
+        guard lockState == .none, !clipboard.items.isEmpty else { return }
+        if controller.isExpanded && openFeature == .clipboard {
+            setOpen(false)
+            return
+        }
+        clipboard.setKeyboard(true)
+        peekFeature = .clipboard
+        setOpen(true)
+        setKeyCapture?(true)
+    }
+
+    func pick(_ item: ClipboardHistory.Item) {
+        clipboard.copy(item)
+        setOpen(false)
+        guard clipboard.pastesOnPick && AXIsProcessTrusted() else {
+            liveActivities.copied(icon: item.app, image: item.image, color: Self.color(for: item), symbol: Self.symbol(for: item.kind))
+            return
+        }
+        // the key window has to hand the keys back to the app first
+        Task {
+            try? await Task.sleep(for: .seconds(0.12))
+            for down in [true, false] {
+                let event = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: down)
+                event?.flags = .maskCommand
+                event?.post(tap: .cghidEventTap)
+            }
+        }
+    }
+
+    func clipboardKey(_ event: NSEvent) {
+        let items = clipboard.items
+        guard !items.isEmpty else { return setOpen(false) }
+        let columns = 5
+        var selection = clipboard.selection
+        switch Int(event.keyCode) {
+        case kVK_Escape: return setOpen(false)
+        case kVK_Return, kVK_ANSI_KeypadEnter: return pick(items[min(selection, items.count - 1)])
+        case kVK_Delete, kVK_ForwardDelete: return clipboard.remove(items[min(selection, items.count - 1)])
+        case kVK_LeftArrow: selection -= 1
+        case kVK_RightArrow: selection += 1
+        case kVK_UpArrow: selection -= columns
+        case kVK_DownArrow: selection += columns
+        default:
+            if let digit = event.charactersIgnoringModifiers.flatMap(Int.init), (1...9).contains(digit), digit <= items.count {
+                pick(items[digit - 1])
+            }
+            return
+        }
+        clipboard.selection = min(max(selection, 0), items.count - 1)
+    }
+
+    static func color(for item: ClipboardHistory.Item) -> Color? {
+        item.kind == .color ? ClipboardHistory.color(from: item.text.trimmingCharacters(in: .whitespacesAndNewlines)) : nil
+    }
+
+    static func symbol(for kind: ClipboardHistory.Kind) -> String {
+        switch kind {
+        case .text: "text.alignleft"
+        case .link: "link"
+        case .color: "paintpalette.fill"
+        case .image: "photo"
+        case .files: "doc.fill"
+        }
     }
 
     func hover(_ inside: Bool) {
@@ -186,6 +277,8 @@ final class LabState {
             c.collapse()
             selectedAgent = nil
             peekFeature = nil
+            clipboard.setKeyboard(false)
+            setKeyCapture?(false)
             Task {
                 try? await Task.sleep(for: .seconds(1.5))
                 malloc_zone_pressure_relief(nil, 0)
@@ -218,6 +311,11 @@ struct NicheView: View {
                                 .frame(width: LabState.openSize.width - 2 * 18,
                                        height: LabState.openSize.height - LabState.hardwareNotch.height - 16, alignment: .top)
                                 .padding(.top, LabState.hardwareNotch.height + 2)
+                        } else if lab.openFeature == .clipboard {
+                            ClipboardView(history: lab.clipboard) { lab.pick($0) }
+                                .frame(width: LabState.openSize.width - 2 * 18,
+                                       height: LabState.openSize.height - LabState.hardwareNotch.height - 16, alignment: .top)
+                                .padding(.top, LabState.hardwareNotch.height + 4)
                         } else {
                             MusicExpandedView(player: lab.player, width: LabState.openSize.width - 2 * 18)
                                 .padding(.top, 18 + lab.activityRoom)
@@ -332,6 +430,13 @@ struct NicheView: View {
     private var ears: some View {
         HStack(spacing: 4) {
             Spacer(minLength: 0)
+            if !lab.clipboard.items.isEmpty {
+                Button { lab.showClipboard() } label: {
+                    ClipboardMark(count: lab.clipboard.items.count, isShown: lab.openFeature == .clipboard)
+                }
+                .buttonStyle(.plain)
+                .transition(.scale(scale: 0.5).combined(with: .opacity))
+            }
             if lab.activeFeatures.contains(.agents) {
                 ForEach(AgentKind.allCases, id: \.self) { kind in
                     let sessions = lab.agents.sessions(of: kind)
@@ -349,7 +454,8 @@ struct NicheView: View {
             }
             let upcoming = lab.upcomingFeatures
             if !upcoming.isEmpty, let current = lab.openFeature {
-                let stack = upcoming + [current]
+                // the clipboard has its own mark, so the stack only holds the real features
+                let stack = current == .clipboard ? upcoming : upcoming + [current]
                 Button {
                     withAnimation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0)) { lab.switchFeature() }
                 } label: {
@@ -405,6 +511,7 @@ struct FeatureLogo: View {
         let (symbol, tint): (String, Color) = switch feature {
         case .music: ("music.note", Color(red: 1, green: 0.42, blue: 0.55))
         case .agents: ("sparkles", Color(red: 0.85, green: 0.6, blue: 1))
+        case .clipboard: ("list.clipboard.fill", Color(red: 0.45, green: 0.85, blue: 0.8))
         }
         Image(systemName: symbol)
             .font(.system(size: 11, weight: .bold))
@@ -501,6 +608,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
+    private var keyCatcher: KeyCatcher?
     private var notchSpace: UInt64 = 0
     private var monitors: [Any] = []
     private var playbackTimer: Timer?
@@ -552,6 +660,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lab.agents.start()
         lab.updater.start()
         lab.liveActivities.start()
+        lab.clipboard.start()
+        let catcher = KeyCatcher()
+        catcher.onKey = { [weak self] in self?.lab.clipboardKey($0) }
+        keyCatcher = catcher
+        lab.setKeyCapture = { [weak catcher] on in
+            if on { catcher?.makeKeyAndOrderFront(nil) } else { catcher?.orderOut(nil) }
+        }
+        // clicking anywhere else takes the keys away, and that closes the clipboard too
+        monitors.append(NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: catcher, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.lab.clipboard.isKeyboard else { return }
+                self.lab.setOpen(false)
+            }
+        })
         for sig in [SIGTERM, SIGINT] {
             signal(sig, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)

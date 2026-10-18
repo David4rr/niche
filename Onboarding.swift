@@ -30,7 +30,7 @@ struct OnboardingView: View {
             Text("Welcome to Niche")
                 .font(.system(size: 22, weight: .bold))
                 .padding(.top, 10)
-            Text("Your music, agents and system changes live in the notch. Hover it to peek, click to open, right-click for settings.")
+            Text("Your music, agents, clipboard and system changes live in the notch. Hover it to peek, click to open, right-click for settings.")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -42,7 +42,7 @@ struct OnboardingView: View {
                 TimelineView(.periodic(from: .now, by: 1)) { _ in
                     let trusted = AXIsProcessTrusted()
                     row(symbol: "hand.raised.fill", tint: .blue, title: "Accessibility",
-                        detail: "Replaces the volume and brightness popups, and opens the right terminal tab for an agent.") {
+                        detail: "Replaces the volume and brightness popups, pastes from your clipboard history, and opens the right terminal tab for an agent.") {
                         if trusted {
                             Label("Allowed", systemImage: "checkmark.circle.fill")
                                 .labelStyle(.titleAndIcon)

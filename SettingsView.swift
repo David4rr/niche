@@ -8,7 +8,7 @@ struct SettingsView: View {
     @State private var openAtLogin = OpenAtLogin.isOn
 
     enum Pane: String, CaseIterable, Identifiable {
-        case general = "General", music = "Music", agents = "Agents", liveActivities = "Live Activities"
+        case general = "General", music = "Music", agents = "Agents", clipboard = "Clipboard", liveActivities = "Live Activities"
         case lockScreen = "Lock Screen", updates = "Updates"
         var id: Self { self }
         var symbol: String {
@@ -16,6 +16,7 @@ struct SettingsView: View {
             case .general: "gearshape.fill"
             case .music: "music.note"
             case .agents: "sparkles"
+            case .clipboard: "list.clipboard.fill"
             case .liveActivities: "dot.radiowaves.left.and.right"
             case .lockScreen: "lock.fill"
             case .updates: "arrow.down.circle.fill"
@@ -26,6 +27,7 @@ struct SettingsView: View {
             case .general: .gray
             case .music: Color(red: 1, green: 0.42, blue: 0.55)
             case .agents: Color(red: 0.72, green: 0.5, blue: 0.95)
+            case .clipboard: Color(red: 0.2, green: 0.7, blue: 0.65)
             case .liveActivities: .orange
             case .lockScreen: .blue
             case .updates: .green
@@ -54,6 +56,7 @@ struct SettingsView: View {
                 case .general: general
                 case .music: music
                 case .agents: agents
+                case .clipboard: clipboard
                 case .liveActivities: liveActivities
                 case .lockScreen: lockScreen
                 case .updates: updates
@@ -124,6 +127,32 @@ struct SettingsView: View {
                 Text("Open session on click")
             } footer: {
                 Text("Clicking a session switches tmux to its pane and brings the terminal forward. Picking the right terminal tab needs the accessibility permission.")
+            }
+        }
+    }
+
+    private var clipboard: some View {
+        let history = lab.clipboard
+        return Group {
+            Section {
+                Toggle("Keep clipboard history", isOn: Binding(get: { history.isOn }, set: { history.isOn = $0 }))
+                Stepper(value: Binding(get: { history.limit }, set: { history.limit = $0 }), in: 3...ClipboardHistory.maxLimit) {
+                    LabeledContent("Remember", value: "\(history.limit) items")
+                }
+                .disabled(!history.isOn)
+            } footer: {
+                Text("Copies stay on this Mac, in memory only, and are gone when Niche quits. Passwords copied from password managers are skipped.")
+            }
+            Section {
+                Toggle("Open with ⌃⌘V", isOn: Binding(get: { history.shortcutOn }, set: { history.shortcutOn = $0 }))
+                Toggle("Paste when picking an item", isOn: Binding(get: { history.pastesOnPick }, set: { history.pastesOnPick = $0 }))
+            } footer: {
+                Text("⌃⌘V opens the clipboard from anywhere: press 1 to 9, or move with the arrows and press Return. Pasting straight into the app you were typing in needs the accessibility permission; without it, the item is copied and you press ⌘V.")
+            }
+            .disabled(!history.isOn)
+            Section {
+                Button("Clear history", role: .destructive) { history.clear() }
+                    .disabled(history.items.isEmpty)
             }
         }
     }

@@ -8,7 +8,7 @@ import SwiftUI
 @Observable
 final class LiveActivityCenter {
     enum Kind: String, CaseIterable, Identifiable {
-        case capsLock, focus, volume, brightness, lowBattery, charging, fullyCharged, agentDone
+        case capsLock, focus, volume, brightness, lowBattery, charging, fullyCharged, agentDone, copied
         var id: Self { self }
         var title: String {
             switch self {
@@ -20,6 +20,7 @@ final class LiveActivityCenter {
             case .charging: "Charging"
             case .fullyCharged: "Fully charged"
             case .agentDone: "Agent finished"
+            case .copied: "Copied to clipboard"
             }
         }
     }
@@ -30,6 +31,9 @@ final class LiveActivityCenter {
         var isOn = false
         var symbol: String?
         var agent: AgentKind?
+        var icon: NSImage?
+        var image: NSImage?
+        var color: Color?
     }
 
     private(set) var current: Activity?
@@ -114,6 +118,11 @@ final class LiveActivityCenter {
     func agentFinished(_ kind: AgentKind) {
         guard watching(.agentDone) else { return }
         show(Activity(kind: .agentDone, agent: kind), for: 2.5)
+    }
+
+    func copied(icon: NSImage?, image: NSImage?, color: Color?, symbol: String) {
+        guard watching(.copied) else { return }
+        show(Activity(kind: .copied, symbol: symbol, icon: icon, image: image, color: color), for: 1.6)
     }
 
     private func watching(_ kind: Kind) -> Bool { isOn && enabled.contains(kind) }
@@ -493,6 +502,12 @@ struct LiveActivityView: View {
             symbol("battery.100percent", tint: .green)
         case .agentDone:
             if let agent = activity.agent { AgentGlyph(kind: agent, size: 13) }
+        case .copied:
+            if let icon = activity.icon {
+                Image(nsImage: icon).resizable().frame(width: 16, height: 16)
+            } else {
+                symbol("list.clipboard.fill", tint: .white)
+            }
         }
     }
 
@@ -507,6 +522,18 @@ struct LiveActivityView: View {
                 .foregroundStyle(activity.kind == .lowBattery ? Color.red : .white.opacity(0.85))
         case .agentDone:
             symbol("checkmark.circle.fill", tint: .green)
+        case .copied:
+            if let color = activity.color {
+                Circle().fill(color)
+                    .frame(width: 14, height: 14)
+                    .overlay(Circle().strokeBorder(.white.opacity(0.3), lineWidth: 1))
+            } else if let image = activity.image {
+                Image(nsImage: image).resizable().scaledToFill()
+                    .frame(width: 18, height: 18)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            } else {
+                symbol(activity.symbol ?? "doc.on.doc", tint: Color(red: 0.45, green: 0.85, blue: 0.8))
+            }
         }
     }
 
