@@ -419,7 +419,7 @@ struct LockIndicator: View {
     let state: LabState.LockState
     let isShown: Bool
     @State private var lift: CGFloat = 2
-    @State private var shift: CGFloat = 3
+    @State private var swing: Double = 180
     @State private var squash: CGFloat = 1
 
     var body: some View {
@@ -428,7 +428,8 @@ struct LockIndicator: View {
                 Shackle()
                     .stroke(.white, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
                     .frame(width: 6.5, height: 6.5)
-                    .offset(x: shift, y: -4.5 - lift)
+                    .rotation3DEffect(.degrees(swing), axis: (x: 0, y: 1, z: 0), anchor: .trailing, perspective: 0)
+                    .offset(y: -4.5 - lift)
                 RoundedRectangle(cornerRadius: 2)
                     .fill(.white)
                     .frame(width: 9.5, height: 7)
@@ -449,7 +450,7 @@ struct LockIndicator: View {
 
     private func latch() async {
         try? await Task.sleep(for: .seconds(0.12))
-        withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) { shift = 0 }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { swing = 0 }
         try? await Task.sleep(for: .seconds(0.15))
         withAnimation(.spring(response: 0.2, dampingFraction: 0.5)) { lift = 0 }
         try? await Task.sleep(for: .seconds(0.06))
@@ -466,7 +467,7 @@ struct LockIndicator: View {
             lift = 2.5
         }
         try? await Task.sleep(for: .seconds(0.1))
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.55)) { shift = 3 }
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) { swing = 180 }
     }
 }
 

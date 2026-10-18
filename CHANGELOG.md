@@ -1,5 +1,9 @@
 # changelog
 
+## 0.3.7.1
+
+- the padlock shackle now swings open around its right leg, like a real padlock, instead of lifting out of the middle and sliding over. locking swings it back the same way.
+
 ## 0.3.7
 
 a padlock that clicks.
