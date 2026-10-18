@@ -34,6 +34,7 @@ final class MusicPlayer {
     @ObservationIgnored private var pendingSong: Track?
     @ObservationIgnored private var lastSong: Track?
     @ObservationIgnored private var pendingDeadline: Task<Void, Never>?
+    @ObservationIgnored private var clearTask: Task<Void, Never>?
     @ObservationIgnored private var process: Process?
     @ObservationIgnored private let send: @convention(c) (Int, AnyObject?) -> Bool
     @ObservationIgnored private let setElapsed: @convention(c) (Double) -> Void
@@ -87,14 +88,24 @@ final class MusicPlayer {
     }
 
     private func apply(_ snapshot: NowPlayingSnapshot) {
+        // while a song changes, now playing can report nothing for a moment. only clear the track if it
+        // stays empty, otherwise the notch flashes to its empty state between songs
         guard let next = snapshot.track else {
-            pendingSong = nil
-            pendingDeadline?.cancel()
-            track = nil
-            isPlaying = false
-            spectrum.follow(pid: nil)
+            guard track != nil, clearTask == nil else { return }
+            clearTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(1.5))
+                guard !Task.isCancelled, let self else { return }
+                self.clearTask = nil
+                self.pendingSong = nil
+                self.pendingDeadline?.cancel()
+                self.track = nil
+                self.isPlaying = false
+                self.spectrum.follow(pid: nil)
+            }
             return
         }
+        clearTask?.cancel()
+        clearTask = nil
         isPlaying = snapshot.isPlaying
         if let shuffle = snapshot.shuffleMode { isShuffled = shuffle != 1 }
         if let mode = snapshot.repeatMode { repeatMode = mode }

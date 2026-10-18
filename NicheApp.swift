@@ -354,6 +354,7 @@ final class LabState {
 struct NicheView: View {
     let lab: LabState
     @State private var closedFeature = LabState.Feature.music
+    @State private var hop: LabState.Feature?
 
     var body: some View {
         let c = lab.controller
@@ -366,24 +367,34 @@ struct NicheView: View {
                 NotchShape(topCornerRadius: radii.top, bottomCornerRadius: radii.bottom)
                     .fill(.black)
                 if c.isExpanded {
-                    Group {
-                        if lab.openFeature == .agents {
-                            AgentSessionList(sessions: lab.agents.sessions) { session in
-                                lab.agents.focus(session)
-                                lab.setOpen(false)
+                    // a real container (not a Group), so the frame, top row and fade belong to the open notch
+                    // as a whole and stay put; only the pane inside changes when the switcher is used
+                    ZStack(alignment: .top) {
+                        Group {
+                            if lab.openFeature == .agents {
+                                AgentSessionList(sessions: lab.agents.sessions) { session in
+                                    lab.agents.focus(session)
+                                    lab.setOpen(false)
+                                }
+                                    .frame(width: LabState.openSize.width - 2 * 18,
+                                           height: LabState.openSize.height - LabState.hardwareNotch.height - 16, alignment: .top)
+                                    .padding(.top, LabState.hardwareNotch.height + 2)
+                            } else if lab.openFeature == .clipboard {
+                                ClipboardView(history: lab.clipboard) { lab.pick($0) }
+                                    .frame(width: LabState.openSize.width - 2 * 18,
+                                           height: LabState.openSize.height - LabState.hardwareNotch.height - 16, alignment: .top)
+                                    .padding(.top, LabState.hardwareNotch.height + 4)
+                            } else {
+                                MusicExpandedView(player: lab.player, width: LabState.openSize.width - 2 * 18)
+                                    .padding(.top, 18 + lab.activityRoom)
                             }
-                                .frame(width: LabState.openSize.width - 2 * 18,
-                                       height: LabState.openSize.height - LabState.hardwareNotch.height - 16, alignment: .top)
-                                .padding(.top, LabState.hardwareNotch.height + 2)
-                        } else if lab.openFeature == .clipboard {
-                            ClipboardView(history: lab.clipboard) { lab.pick($0) }
-                                .frame(width: LabState.openSize.width - 2 * 18,
-                                       height: LabState.openSize.height - LabState.hardwareNotch.height - 16, alignment: .top)
-                                .padding(.top, LabState.hardwareNotch.height + 4)
-                        } else {
-                            MusicExpandedView(player: lab.player, width: LabState.openSize.width - 2 * 18)
-                                .padding(.top, 18 + lab.activityRoom)
                         }
+                        .id(lab.openFeature)
+                        .transition(.asymmetric(
+                            insertion: AnyTransition(.blurReplace).combined(with: .offset(x: 14))
+                                .animation(.spring(Spring(duration: 0.4, bounce: 0.2), blendDuration: 0)),
+                            removal: AnyTransition(.blurReplace).combined(with: .offset(x: -14))
+                                .animation(.easeIn(duration: 0.14))))
                     }
                         .frame(width: LabState.openSize.width + 2 * 16, height: size.height, alignment: .top)
                         .overlay(alignment: .top) { topRow }
@@ -503,17 +514,28 @@ struct NicheView: View {
             if !upcoming.isEmpty, let current = lab.openFeature {
                 let stack = upcoming + [current]
                 Button {
-                    withAnimation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0)) { lab.switchFeature() }
+                    // the front card hops up and slides to the back while the next one comes forward
+                    hop = stack.first
+                    withAnimation(.spring(Spring(duration: 0.45, bounce: 0.3), blendDuration: 0)) { lab.switchFeature() }
+                    Task {
+                        try? await Task.sleep(for: .seconds(0.16))
+                        withAnimation(.spring(Spring(duration: 0.35, bounce: 0.25), blendDuration: 0)) { hop = nil }
+                    }
                 } label: {
                     ZStack {
-                        ForEach(Array(stack.enumerated().reversed()), id: \.element) { depth, feature in
+                        // fixed order and identity, so cards slide between depths instead of being rebuilt
+                        ForEach(LabState.Feature.allCases.filter(stack.contains), id: \.self) { feature in
+                            let depth = CGFloat(stack.firstIndex(of: feature) ?? 0)
                             FeatureLogo(feature: feature)
-                                .scaleEffect(1 - 0.14 * CGFloat(depth))
-                                .offset(x: -14 * CGFloat(depth))
+                                .scaleEffect(1 - 0.14 * depth)
+                                .offset(x: -14 * depth, y: hop == feature ? -4 : 0)
                                 .opacity(1 - 0.35 * Double(depth))
+                                .zIndex(-Double(depth))
+                                .transition(.scale(scale: 0.5).combined(with: .opacity))
                         }
                     }
                     .frame(width: 22 + 14 * CGFloat(stack.count - 1), height: 22, alignment: .trailing)
+                    .animation(.spring(Spring(duration: 0.45, bounce: 0.3), blendDuration: 0), value: stack)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

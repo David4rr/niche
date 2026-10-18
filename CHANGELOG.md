@@ -1,5 +1,11 @@
 # changelog
 
+## 0.6.1
+
+- the feature switcher animates now: the front circle hops and slides to the back while the next one comes forward.
+- switching no longer blanks the whole open notch for a moment. the current view blurs and slides out while the next one slides in, and the top row stays put.
+- changing songs quickly no longer drops the notch to its empty state. a blank now-playing update between songs is ignored unless nothing plays for 1.5 s.
+
 ## 0.6.0
 
 one switch.
