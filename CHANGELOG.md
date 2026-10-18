@@ -1,5 +1,12 @@
 # changelog
 
+## 0.3.5
+
+smoother live activities.
+
+- activities now blur and fade out when they end, instead of vanishing, and then the music or agents come back.
+- volume and brightness slide between levels instead of jumping, and their icons fill in with the level.
+
 ## 0.3.4
 
 agent marks stay put.

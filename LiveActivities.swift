@@ -33,6 +33,7 @@ final class LiveActivityCenter {
     }
 
     private(set) var current: Activity?
+    private(set) var isShowing = false
 
     var isOn: Bool {
         didSet { UserDefaults.standard.set(isOn, forKey: "liveActivities"); restart() }
@@ -435,7 +436,12 @@ final class LiveActivityCenter {
     }
 
     private func show(_ activity: Activity, for seconds: Double) {
-        withAnimation(.spring(Spring(duration: 0.4, bounce: 0.25), blendDuration: 0)) { current = activity }
+        let animation: Animation = current?.kind == activity.kind
+            ? .smooth(duration: 0.25) : .spring(Spring(duration: 0.4, bounce: 0.25), blendDuration: 0)
+        withAnimation(animation) {
+            current = activity
+            isShowing = true
+        }
         hideTask?.cancel()
         hideTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(seconds))
@@ -446,7 +452,12 @@ final class LiveActivityCenter {
 
     private func hide() {
         hideTask?.cancel()
-        withAnimation(.spring(response: 0.45, dampingFraction: 0.95)) { current = nil }
+        withAnimation(.easeOut(duration: 0.25)) { isShowing = false }
+        hideTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(0.25))
+            guard !Task.isCancelled, let self else { return }
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.95)) { self.current = nil }
+        }
     }
 }
 
@@ -471,9 +482,9 @@ struct LiveActivityView: View {
         case .focus:
             symbol(activity.symbol ?? "moon.fill", tint: activity.isOn ? Color(red: 0.58, green: 0.5, blue: 1) : .white.opacity(0.5))
         case .volume:
-            symbol(volumeSymbol, tint: .white)
+            symbol(activity.isOn ? "speaker.wave.3.fill" : "speaker.slash.fill", tint: .white, value: activity.isOn ? activity.level : 1)
         case .brightness:
-            symbol(activity.level < 0.35 ? "sun.min.fill" : "sun.max.fill", tint: .yellow)
+            symbol("sun.max.fill", tint: .yellow, value: activity.level)
         case .lowBattery:
             symbol(activity.level <= 0.1 ? "battery.0percent" : "battery.25percent", tint: .red)
         case .charging:
@@ -499,9 +510,11 @@ struct LiveActivityView: View {
         }
     }
 
-    private var volumeSymbol: String {
-        if !activity.isOn || activity.level == 0 { return "speaker.slash.fill" }
-        return activity.level < 0.34 ? "speaker.wave.1.fill" : activity.level < 0.67 ? "speaker.wave.2.fill" : "speaker.wave.3.fill"
+    private func symbol(_ name: String, tint: Color, value: Double) -> some View {
+        Image(systemName: name, variableValue: value)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(tint)
+            .frame(width: 18)
     }
 
     private func label(_ text: String) -> some View {
@@ -528,6 +541,6 @@ private struct LevelBar: View {
                     .frame(width: 26 * min(max(level, 0), 1))
             }
             .frame(width: 26, height: 5)
-            .animation(.spring(response: 0.25, dampingFraction: 0.9), value: level)
+            .animation(.smooth(duration: 0.25), value: level)
     }
 }

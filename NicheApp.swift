@@ -231,8 +231,8 @@ struct NicheView: View {
                         .id(activity.kind)
                         .frame(width: LabState.closedSize(hasContent: true).width, height: LabState.hardwareNotch.height)
                         .drawingGroup()
-                        .transition(.asymmetric(insertion: AnyTransition(.blurReplace).animation(.spring(response: 0.35, dampingFraction: 0.9)),
-                                                removal: .opacity.animation(.easeOut(duration: 0.12))))
+                        .modifier(ActivityFade(isShown: lab.liveActivities.isShowing))
+                        .transition(Self.activityTransition)
                 } else {
                     Group {
                         if closedFeature == .agents {
@@ -299,6 +299,10 @@ struct NicheView: View {
             : .spring(response: 0.45, dampingFraction: 0.95)
     }
 
+    private static let activityTransition = AnyTransition.asymmetric(
+        insertion: AnyTransition(.blurReplace).animation(.spring(response: 0.35, dampingFraction: 0.9)),
+        removal: .identity)
+
     private static func closedContentTransition(afterClosing: Bool) -> AnyTransition {
         .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(afterClosing ? 0.25 : 0.05)),
                     removal: .opacity.animation(.easeOut(duration: 0.1)))
@@ -310,8 +314,8 @@ struct NicheView: View {
                 .id(activity.kind)
                 .padding(.horizontal, 16 + 4)
                 .frame(height: LabState.hardwareNotch.height)
-                .transition(.asymmetric(insertion: AnyTransition(.blurReplace).animation(.spring(response: 0.35, dampingFraction: 0.9)),
-                                        removal: .opacity.animation(.easeOut(duration: 0.15))))
+                .modifier(ActivityFade(isShown: lab.liveActivities.isShowing))
+                .transition(Self.activityTransition)
         } else {
             ears
                 .transition(.opacity.animation(.easeOut(duration: 0.2).delay(0.1)))
@@ -359,6 +363,17 @@ struct NicheView: View {
         }
         .padding(.horizontal, 16 + 10)
         .frame(height: LabState.hardwareNotch.height)
+    }
+}
+
+struct ActivityFade: ViewModifier {
+    let isShown: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(isShown ? 1 : 0)
+            .blur(radius: isShown ? 0 : 6)
+            .scaleEffect(isShown ? 1 : 0.9)
     }
 }
 
