@@ -154,9 +154,18 @@ final class LabState {
     }
 
     var currentSize: CGSize {
-        controller.isExpanded
-            ? CGSize(width: Self.openSize.width, height: Self.openSize.height + activityRoom)
-            : Self.closedSize(hasContent: hasClosedContent)
+        if controller.isExpanded {
+            return CGSize(width: Self.openSize.width, height: Self.openSize.height + activityRoom)
+        }
+        let size = Self.closedSize(hasContent: hasClosedContent)
+        return CGSize(width: size.width + agentsRoom, height: size.height)
+    }
+
+    // the closed agent view gets wider so every agent kind sits side by side with its own status dot
+    var agentsRoom: CGFloat {
+        guard lockState == .none, liveActivities.current == nil, shownFeature == .agents else { return 0 }
+        let kinds = AgentKind.allCases.filter { !agents.sessions(of: $0).isEmpty }.count
+        return CGFloat(max(kinds - 1, 0)) * 2 * 22
     }
 
     var activeFeatures: [Feature] {
@@ -399,7 +408,7 @@ struct NicheView: View {
                             MusicClosedView(player: lab.player)
                         }
                     }
-                        .frame(width: LabState.closedSize(hasContent: true).width, height: LabState.hardwareNotch.height)
+                        .frame(width: LabState.closedSize(hasContent: true).width + lab.agentsRoom, height: LabState.hardwareNotch.height)
                         .modifier(ClosedContentFade(isShown: lab.hasClosedContent))
                         .transition(Self.closedContentTransition(afterClosing: c.isCollapsing || c.isExpanded))
                 }

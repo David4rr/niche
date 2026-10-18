@@ -448,7 +448,8 @@ struct AgentClosedView: View {
         let working = sessions.filter { $0.state == .working }.count
         HStack(spacing: 0) {
             if let art {
-                IdleArtView(art: art, size: 26, cornerRadius: 6)
+                IdleArtView(art: art, size: 24, cornerRadius: 7)
+                    .offset(y: -1)
                     .padding(.leading, 5)
                     .frame(width: MusicClosedView.slot, alignment: .leading)
                     .transition(.opacity)
@@ -456,28 +457,19 @@ struct AgentClosedView: View {
             Spacer(minLength: 0)
             HStack(spacing: 4) {
                 // one glyph per agent kind, stacked like the feature switcher, the status dot on the front one
-                ZStack(alignment: .leading) {
-                    // later kinds sit further right and on top, with a black ring cutting into the one behind
-                    ForEach(Array(live.enumerated()), id: \.element) { depth, kind in
-                        AgentGlyph(kind: kind, size: 11)
-                            .frame(width: 16, height: 16)
-                            .background(Circle().fill(.black))
-                            .offset(x: CGFloat(depth) * 10)
-                            .zIndex(Double(depth))
+                HStack(spacing: 8) {
+                    ForEach(live, id: \.self) { kind in
+                        AgentIndicator(kind: kind, sessions: sessions.filter { $0.kind == kind })
+                            .frame(width: 14, height: 14)
                             .transition(.scale(scale: 0.5).combined(with: .opacity))
                     }
-                }
-                .frame(width: 16 + CGFloat(max(live.count - 1, 0)) * 10, alignment: .leading)
-                .overlay(alignment: .bottomTrailing) {
-                    StatusDot(working: working > 0).offset(x: 2, y: 2)
                 }
                 Text("\(working > 0 ? working : sessions.count)")
                     .font(.system(size: 12, weight: .semibold).monospacedDigit())
                     .foregroundStyle(.white.opacity(0.85))
                     .contentTransition(.numericText())
             }
-            .padding(.trailing, 8)
-            .frame(width: MusicClosedView.slot + 6, alignment: .trailing)
+            .padding(.trailing, 9)
             .offset(y: -2)
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: live)

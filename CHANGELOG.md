@@ -1,5 +1,10 @@
 # changelog
 
+## 0.5.4
+
+- the notch picture now sits exactly like the song artwork: 24 pt, with the same 5 pt gap on the left and underneath.
+- with more than one kind of agent running, the closed notch widens a little so claude and omp sit side by side, each with its own working or waiting dot, then the count.
+
 ## 0.5.3
 
 five notch pictures built in.

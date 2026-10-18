@@ -114,8 +114,9 @@ struct IdleClosedView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // a bit bigger than the 20 pt song artwork, still inside the notch height with a few points to spare
-            IdleArtView(art: art, size: 26, cornerRadius: 6)
+            // same box as the song artwork: 24 pt, 5 pt from the notch's edge and bottom
+            IdleArtView(art: art, size: 24, cornerRadius: 7)
+                .offset(y: -1)
                 .padding(.leading, 5)
                 .frame(width: MusicClosedView.slot, alignment: .leading)
             Spacer(minLength: 0)
