@@ -1,5 +1,13 @@
 # changelog
 
+## 0.3.2
+
+a new icon.
+
+- the app icon is now a dark screen with the notch, framed in white.
+- the menu bar shows the same notch shape instead of the word niche.
+- the download is smaller again, 2.2 mb instead of 3.4 mb.
+
 ## 0.3.1
 
 a proper welcome and an icon.

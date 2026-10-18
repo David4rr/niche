@@ -456,7 +456,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CGSAddWindowsToSpaces(cid, [panel.windowNumber] as NSArray, [notchSpace] as NSArray)
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "niche"
+        statusItem.button?.image = Self.menuBarIcon()
         let menu = NSMenu()
         menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
         menu.addItem(.separator())
@@ -557,5 +557,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
+    }
+
+    private static func menuBarIcon() -> NSImage {
+        let image = NSImage(size: NSSize(width: 20, height: 16), flipped: false) { _ in
+            let x0: CGFloat = 2, x1: CGFloat = 18, y0: CGFloat = 2.5, y1: CGFloat = 13.5
+            let nl: CGFloat = 10 - 3.4, nr: CGFloat = 10 + 3.4, depth: CGFloat = 2.6
+            let corners: [(CGPoint, CGFloat)] = [
+                (CGPoint(x: x0, y: y1), 3.6), (CGPoint(x: nl, y: y1), 0.8), (CGPoint(x: nl, y: y1 - depth), 1.2),
+                (CGPoint(x: nr, y: y1 - depth), 1.2), (CGPoint(x: nr, y: y1), 0.8), (CGPoint(x: x1, y: y1), 3.6),
+                (CGPoint(x: x1, y: y0), 3.6), (CGPoint(x: x0, y: y0), 3.6),
+            ]
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: x0, y: 8))
+            for i in corners.indices {
+                path.addArc(tangent1End: corners[i].0, tangent2End: corners[(i + 1) % corners.count].0, radius: corners[i].1)
+            }
+            path.closeSubpath()
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+            ctx.addPath(path)
+            ctx.setLineWidth(1.6)
+            ctx.strokePath()
+            return true
+        }
+        image.isTemplate = true
+        return image
     }
 }
