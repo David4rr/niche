@@ -437,6 +437,9 @@ struct AgentSessionRow: View {
 
 struct AgentClosedView: View {
     let monitor: AgentMonitor
+    // with nothing else in the notch, the agents share it with the notch picture: picture on the
+    // left, a compact agent cluster on the right
+    let art: IdleArt?
     @State private var lastSessions: [AgentSession] = []
 
     var body: some View {
@@ -444,23 +447,38 @@ struct AgentClosedView: View {
         let live = AgentKind.allCases.filter { kind in sessions.contains { $0.kind == kind } }
         let working = sessions.filter { $0.state == .working }.count
         HStack(spacing: 0) {
-            HStack(spacing: 7) {
-                ForEach(live, id: \.self) { kind in
-                    AgentGlyph(kind: kind, size: 14)
-                        .transition(.scale(scale: 0.5).combined(with: .opacity))
-                }
+            if let art {
+                IdleArtView(art: art, size: 26, cornerRadius: 6)
+                    .padding(.leading, 5)
+                    .frame(width: MusicClosedView.slot, alignment: .leading)
+                    .transition(.opacity)
             }
-            .frame(width: MusicClosedView.slot)
             Spacer(minLength: 0)
             HStack(spacing: 4) {
-                StatusDot(working: working > 0)
+                // one glyph per agent kind, stacked like the feature switcher, the status dot on the front one
+                ZStack(alignment: .leading) {
+                    ForEach(Array(live.enumerated().reversed()), id: \.element) { depth, kind in
+                        AgentGlyph(kind: kind, size: 12)
+                            .frame(width: 16, height: 16)
+                            .background(Circle().fill(.black))
+                            .offset(x: CGFloat(depth) * 7)
+                            .transition(.scale(scale: 0.5).combined(with: .opacity))
+                    }
+                }
+                .frame(width: 16 + CGFloat(max(live.count - 1, 0)) * 7, alignment: .leading)
+                .overlay(alignment: .bottomTrailing) {
+                    StatusDot(working: working > 0).offset(x: 2, y: 2)
+                }
                 Text("\(working > 0 ? working : sessions.count)")
                     .font(.system(size: 12, weight: .semibold).monospacedDigit())
                     .foregroundStyle(.white.opacity(0.85))
                     .contentTransition(.numericText())
             }
-            .frame(width: MusicClosedView.slot)
+            .padding(.trailing, 8)
+            .frame(width: MusicClosedView.slot + 6, alignment: .trailing)
+            .offset(y: -2)
         }
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: live)
         .onAppear { lastSessions = monitor.sessions }
         .onChange(of: monitor.sessions) { _, sessions in
             if !sessions.isEmpty { lastSessions = sessions }

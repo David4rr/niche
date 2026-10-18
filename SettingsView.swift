@@ -78,8 +78,36 @@ struct SettingsView: View {
                 Text("Right-click the notch to open these settings when the menu bar icon is hidden.")
             }
             Section {
+                LabeledContent("Notch image") {
+                    HStack(spacing: 10) {
+                        if let art = lab.idleArt {
+                            IdleArtView(art: art, size: 28, cornerRadius: 7)
+                        }
+                        Button(lab.idleArt == nil ? "Choose…" : "Change…") { chooseIdleImage() }
+                        if lab.idleArt != nil {
+                            Button("Remove") { lab.clearIdleImage() }
+                        }
+                    }
+                }
+            } footer: {
+                Text("A picture or GIF that sits on the left of the notch when nothing else is showing. Music, agents and live activities still take its place. Best at 64 × 64 pixels or larger, square, with a transparent background. Empty space around the art is trimmed, and GIFs are capped at 300 frames.")
+            }
+            Section {
                 Button("Quit Niche") { NSApp.terminate(nil) }
             }
+        }
+    }
+
+    private func chooseIdleImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = IdleArt.types
+        panel.allowsMultipleSelection = false
+        panel.message = "Pick a picture or GIF for the notch"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        if !lab.setIdleImage(url) {
+            let alert = NSAlert()
+            alert.messageText = "Niche couldn't open that picture."
+            alert.runModal()
         }
     }
 

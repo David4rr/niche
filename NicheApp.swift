@@ -36,6 +36,7 @@ final class LabState {
     let updater = Updater()
     let liveActivities = LiveActivityCenter()
     let clipboard = ClipboardHistory()
+    private(set) var idleArt: IdleArt?
     // clipboard is never a closed-notch feature or part of the switcher: it is only peeked at
     enum Feature: CaseIterable { case music, agents, clipboard }
     var selectedFeature: Feature?
@@ -66,6 +67,9 @@ final class LabState {
             self.liveActivities.copied(icon: item.app, image: item.image, color: Self.color(for: item), symbol: Self.symbol(for: item.kind))
         }
         clipboard.onHotKey = { [weak self] in self?.toggleClipboard() }
+        if let name = defaults.string(forKey: "idleImage") {
+            idleArt = IdleArt.load(IdleArt.folder.appendingPathComponent(name))
+        }
 
         let center = DistributedNotificationCenter.default()
         center.addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
@@ -94,7 +98,37 @@ final class LabState {
     }
     static let openSize = CGSize(width: hardwareNotch.width + 160, height: 175)
 
-    var hasClosedContent: Bool { shownFeature != nil || lockState != .none || liveActivities.current != nil }
+    var hasClosedContent: Bool { shownFeature != nil || idleArt != nil || lockState != .none || liveActivities.current != nil }
+
+    // copies the picked file into niche's own folder, so moving or deleting the original changes nothing
+    func setIdleImage(_ url: URL) -> Bool {
+        let folder = IdleArt.folder
+        let name = "idle.\(url.pathExtension.lowercased())"
+        let target = folder.appendingPathComponent(name)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            for old in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+            where old.lastPathComponent.hasPrefix("idle.") {
+                try FileManager.default.removeItem(at: old)
+            }
+            try FileManager.default.copyItem(at: url, to: target)
+        } catch {
+            NSLog("Niche could not keep the notch image: %@", String(describing: error))
+            return false
+        }
+        guard let art = IdleArt.load(target) else { return false }
+        UserDefaults.standard.set(name, forKey: "idleImage")
+        withAnimation(.spring(Spring(duration: 0.5, bounce: 0.32), blendDuration: 0)) { idleArt = art }
+        return true
+    }
+
+    func clearIdleImage() {
+        if let name = UserDefaults.standard.string(forKey: "idleImage") {
+            try? FileManager.default.removeItem(at: IdleArt.folder.appendingPathComponent(name))
+        }
+        UserDefaults.standard.removeObject(forKey: "idleImage")
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.95)) { idleArt = nil }
+    }
     var hasOpenableContent: Bool { player.track != nil || !agents.isEmpty || !clipboard.items.isEmpty }
 
     var activityRoom: CGFloat {
@@ -340,8 +374,10 @@ struct NicheView: View {
                         .transition(Self.activityTransition)
                 } else {
                     Group {
-                        if closedFeature == .agents {
-                            AgentClosedView(monitor: lab.agents)
+                        if lab.shownFeature == nil, let art = lab.idleArt {
+                            IdleClosedView(art: art)
+                        } else if closedFeature == .agents {
+                            AgentClosedView(monitor: lab.agents, art: lab.idleArt)
                         } else {
                             MusicClosedView(player: lab.player)
                         }

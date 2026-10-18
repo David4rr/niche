@@ -1,5 +1,19 @@
 # changelog
 
+## 0.5.0
+
+a picture for the empty notch.
+
+- pick a picture or gif in settings, under general, and it sits on the left of the notch whenever nothing else is showing. gifs keep their own speed.
+- everything else works the same: music, agents, live activities and the lock screen still take its place, and hovering behaves as before.
+- niche keeps its own copy of the picture, so moving or deleting the original changes nothing. each frame is shrunk once to the notch's size, so even a big gif costs almost nothing.
+- it shows at 26 pt, a little bigger than the song artwork. empty space around the art is trimmed so it fills the slot. best at 64 × 64 px or larger, square, with a transparent background.
+- the song artwork in the closed notch is bigger, 24 pt instead of 20, with the same gap on every side and corners that follow the notch's curve.
+- with only agents running, the closed notch shows your picture on the left and a compact agent cluster on the right: claude and omp stacked, a dot for working or waiting, and the count.
+- live activities sit 2 pt higher, so they look centred in the notch instead of low.
+- memory: about 23 mb right after launch with a gif set and an agent running. the download is 2.3 mb.
+- browsers no longer count as music. a paused tab, or a page that only touched the media controls, used to take over the notch as a song with no artist.
+
 ## 0.4.1
 
 lighter clipboard.

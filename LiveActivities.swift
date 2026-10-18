@@ -482,6 +482,8 @@ struct LiveActivityView: View {
                 .frame(width: MusicClosedView.slot)
         }
         .foregroundStyle(.white)
+        // the notch's black runs on into the bezel above it, so small glyphs that are centred look low
+        .offset(y: -2)
     }
 
     @ViewBuilder private var icon: some View {

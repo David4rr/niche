@@ -25,6 +25,7 @@ move your pointer to the notch and it opens. move away and it tucks itself back 
 - **music**: artwork, title, a seek bar and playback controls for whatever is playing. the little bars dance along with it.
 - **ai agents**: see your claude code and omp sessions at a glance, working or waiting. click one to jump straight to its terminal.
 - **clipboard**: your last 10 copies as tiles in the notch. press ⌃⌘V anywhere and hit a number to paste one.
+- **notch picture**: pin a picture or gif to the empty notch. it stays when only agents are running.
 - **one tap to switch**: flip between music and agents with the switcher in the corner.
 
 ## little moments, in the notch

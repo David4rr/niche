@@ -188,8 +188,16 @@ private struct NowPlayingSnapshot: @unchecked Sendable {
     nonisolated(unsafe) private static let iso: ISO8601DateFormatter = ISO8601DateFormatter()
     nonisolated(unsafe) private static var cachedArtwork: (key: String, image: NSImage?) = ("", nil)
 
+    // every app that can open web links: a tab with video or audio (even a paused one, or a page that
+    // only touched the media api) is not music, so browsers never take the notch
+    private static let browsers: Set<String> = {
+        guard let web = URL(string: "https://example.com") else { return [] }
+        return Set(NSWorkspace.shared.urlsForApplications(toOpen: web).compactMap { Bundle(url: $0)?.bundleIdentifier })
+    }()
+
     init(_ p: [String: Any]) {
-        if let title = p["title"] as? String, !title.isEmpty {
+        let isBrowser = (p["bundleIdentifier"] as? String).map { Self.browsers.contains($0) } ?? false
+        if !isBrowser, let title = p["title"] as? String, !title.isEmpty {
             let art = p["artworkData"] as? String
             let key = art.map { "\($0.count):\($0.suffix(32))" } ?? ""
             if key != Self.cachedArtwork.key {
@@ -512,9 +520,11 @@ struct MusicClosedView: View {
         let shown = player.track ?? lastTrack
         HStack(spacing: 0) {
             if let track = shown {
-                ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: 5)
-                    .frame(width: 20, height: 20)
-                    .padding(.leading, 7)
+                // 24 pt leaves 4 pt above and below in the 32 pt notch; the radius follows the notch's
+                // bottom corner at that inset so the two curves run parallel
+                ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: 7)
+                    .frame(width: 24, height: 24)
+                    .padding(.leading, 4)
                     .frame(width: Self.slot, alignment: .leading)
                 Spacer(minLength: 0)
                 WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)
