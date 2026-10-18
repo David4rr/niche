@@ -320,7 +320,7 @@ struct NicheView: View {
 
     private var ears: some View {
         HStack(spacing: 4) {
-            if lab.shownAgent == nil { Spacer(minLength: 0) }
+            Spacer(minLength: 0)
             if lab.activeFeatures.contains(.agents) {
                 ForEach(AgentKind.allCases, id: \.self) { kind in
                     let sessions = lab.agents.sessions(of: kind)
@@ -336,7 +336,6 @@ struct NicheView: View {
                     }
                 }
             }
-            if lab.shownAgent != nil { Spacer(minLength: 0) }
             let upcoming = lab.upcomingFeatures
             if !upcoming.isEmpty, let current = lab.openFeature {
                 let stack = upcoming + [current]

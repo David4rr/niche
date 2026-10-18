@@ -1,5 +1,11 @@
 # changelog
 
+## 0.3.4
+
+agent marks stay put.
+
+- the agent marks sit on the right next to the feature switcher in every mode, instead of jumping to the left when agents are open.
+
 ## 0.3.3
 
 agent marks peek instead of switching.
