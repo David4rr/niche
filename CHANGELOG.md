@@ -1,5 +1,10 @@
 # changelog
 
+## 0.5.7
+
+- with two kinds of agent running, the closed notch now grows only on the side that needs room, instead of both. the picture side keeps its usual width, and nothing sits under the camera anymore.
+- the open notch is a little wider, so the agent marks and the switcher sit in the right ear clear of the camera. the clipboard mark moved to the left ear.
+
 ## 0.5.6
 
 - the claude and omp marks in the closed notch are the same size now, and the status dots sit at the same spot on each.

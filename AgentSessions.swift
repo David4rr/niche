@@ -462,7 +462,7 @@ struct AgentClosedView: View {
                     .transition(.opacity)
                 Spacer(minLength: 0)
                 HStack(spacing: 7) {
-                    HStack(spacing: 10) {
+                    HStack(spacing: 9) {
                         ForEach(live, id: \.self) { kind in
                             AgentIndicator(kind: kind, sessions: sessions.filter { $0.kind == kind })
                                 .transition(.scale(scale: 0.5).combined(with: .opacity))

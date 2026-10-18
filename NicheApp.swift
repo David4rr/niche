@@ -97,7 +97,7 @@ final class LabState {
     static func closedSize(hasContent: Bool) -> CGSize {
         CGSize(width: hardwareNotch.width + (hasContent ? 2 * MusicClosedView.slot : 0), height: hardwareNotch.height)
     }
-    static let openSize = CGSize(width: hardwareNotch.width + 160, height: 175)
+    static let openSize = CGSize(width: hardwareNotch.width + 200, height: 175)
 
     var hasClosedContent: Bool { shownFeature != nil || idleArt != nil || lockState != .none || liveActivities.current != nil }
 
@@ -158,14 +158,24 @@ final class LabState {
             return CGSize(width: Self.openSize.width, height: Self.openSize.height + activityRoom)
         }
         let size = Self.closedSize(hasContent: hasClosedContent)
-        return CGSize(width: size.width + agentsRoom, height: size.height)
+        let room = agentsRoom
+        return CGSize(width: size.width + room.left + room.right, height: size.height)
     }
 
-    // every agent kind past the first gets room, so marks never crowd the notch's edge
-    var agentsRoom: CGFloat {
-        guard lockState == .none, liveActivities.current == nil, shownFeature == .agents else { return 0 }
+    // room the closed agent view needs past the usual slots, per side. the camera sits in the middle of
+    // the notch where nothing can be drawn, so content must stay inside the slots: with a picture the
+    // agent marks and count sit on the right, without one the marks sit on the left
+    var agentsRoom: (left: CGFloat, right: CGFloat) {
+        guard !controller.isExpanded, lockState == .none, liveActivities.current == nil, shownFeature == .agents else { return (0, 0) }
         let kinds = AgentKind.allCases.filter { !agents.sessions(of: $0).isEmpty }.count
-        return CGFloat(max(kinds - 1, 0)) * 2 * 14
+        guard kinds > 1 else { return (0, 0) }
+        return idleArt != nil ? (0, 26) : (10, 0)
+    }
+
+    // growing one side only moves the notch's centre off the camera, so it is shifted back by half
+    var closedOffset: CGFloat {
+        let room = agentsRoom
+        return (room.right - room.left) / 2
     }
 
     var activeFeatures: [Feature] {
@@ -408,7 +418,7 @@ struct NicheView: View {
                             MusicClosedView(player: lab.player)
                         }
                     }
-                        .frame(width: LabState.closedSize(hasContent: true).width + lab.agentsRoom, height: LabState.hardwareNotch.height)
+                        .frame(width: LabState.closedSize(hasContent: true).width + lab.agentsRoom.left + lab.agentsRoom.right, height: LabState.hardwareNotch.height)
                         .modifier(ClosedContentFade(isShown: lab.hasClosedContent))
                         .transition(Self.closedContentTransition(afterClosing: c.isCollapsing || c.isExpanded))
                 }
@@ -431,6 +441,8 @@ struct NicheView: View {
                     .animation(.easeOut(duration: 0.35), value: c.isExpanded)
             }
             .modifier(NotchSquashModifier(controller: c))
+            .offset(x: lab.closedOffset)
+            .animation(closedResize, value: lab.closedOffset)
             .contentShape(Rectangle())
             .onHover { lab.hover($0) }
             .onChange(of: lab.hasOpenableContent) { _, has in if !has { lab.setOpen(false) } }
@@ -490,8 +502,9 @@ struct NicheView: View {
     }
 
     private var ears: some View {
+        // the camera covers the middle of this row, so marks live in the two ears: clipboard on the
+        // left, agents and the switcher on the right
         HStack(spacing: 4) {
-            Spacer(minLength: 0)
             if !lab.clipboard.items.isEmpty {
                 Button { lab.showClipboard() } label: {
                     ClipboardMark(count: lab.clipboard.items.count, isShown: lab.openFeature == .clipboard)
@@ -499,13 +512,14 @@ struct NicheView: View {
                 .buttonStyle(.plain)
                 .transition(.scale(scale: 0.5).combined(with: .opacity))
             }
+            Spacer(minLength: 0)
             if lab.activeFeatures.contains(.agents) {
                 ForEach(AgentKind.allCases, id: \.self) { kind in
                     let sessions = lab.agents.sessions(of: kind)
                     if !sessions.isEmpty {
                         Button { lab.showAgent(kind) } label: {
                             AgentIndicator(kind: kind, sessions: sessions)
-                                .frame(width: 26, height: 22)
+                                .frame(width: 24, height: 22)
                                 .background(Capsule().fill(.white.opacity(lab.shownAgent == kind ? 0.18 : 0.06)))
                                 .contentShape(Capsule())
                         }
@@ -536,7 +550,7 @@ struct NicheView: View {
                 .transition(.scale(scale: 0.5).combined(with: .opacity))
             }
         }
-        .padding(.horizontal, 16 + 10)
+        .padding(.horizontal, 16 + 6)
         .frame(height: LabState.hardwareNotch.height)
     }
 }
@@ -750,7 +764,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let update: (NSEvent) -> Void = { [weak self] _ in
             guard let self else { return }
             let notch = self.lab.currentSize
-            let hit = NSRect(x: frame.midX - notch.width / 2 - 8, y: frame.maxY - notch.height - 8,
+            let hit = NSRect(x: frame.midX + self.lab.closedOffset - notch.width / 2 - 8, y: frame.maxY - notch.height - 8,
                              width: notch.width + 16, height: notch.height + 8)
             self.panel.ignoresMouseEvents = !hit.contains(NSEvent.mouseLocation)
         }
