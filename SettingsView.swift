@@ -6,6 +6,9 @@ struct SettingsView: View {
     @Bindable var lab: LabState
     @State private var pane: Pane? = .general
     @State private var openAtLogin = OpenAtLogin.isOn
+    @State private var builtInArt: [String: IdleArt] = Dictionary(uniqueKeysWithValues: IdleArt.builtIns.compactMap { name in
+        IdleArt.builtIn(name).flatMap(IdleArt.load).map { (name, $0) }
+    })
 
     enum Pane: String, CaseIterable, Identifiable {
         case general = "General", music = "Music", agents = "Agents", clipboard = "Clipboard", liveActivities = "Live Activities"
@@ -79,18 +82,37 @@ struct SettingsView: View {
             }
             Section {
                 LabeledContent("Notch image") {
+                    HStack(spacing: 6) {
+                        ForEach(IdleArt.builtIns, id: \.self) { name in
+                            Button { lab.setIdleBuiltIn(name) } label: {
+                                Group {
+                                    if let url = IdleArt.builtIn(name), let art = builtInArt[name] ?? IdleArt.load(url) {
+                                        IdleArtView(art: art, size: 26, cornerRadius: 6)
+                                    }
+                                }
+                                .frame(width: 36, height: 36)
+                                .background(RoundedRectangle(cornerRadius: 9).fill(.black))
+                                .overlay(RoundedRectangle(cornerRadius: 9)
+                                    .strokeBorder(lab.idleBuiltIn == name ? Color.accentColor : .clear, lineWidth: 2))
+                            }
+                            .buttonStyle(.plain)
+                            .help(name.replacingOccurrences(of: "-", with: " "))
+                        }
+                    }
+                }
+                LabeledContent("Your own") {
                     HStack(spacing: 10) {
-                        if let art = lab.idleArt {
+                        if let art = lab.idleArt, lab.idleBuiltIn == nil {
                             IdleArtView(art: art, size: 28, cornerRadius: 7)
                         }
-                        Button(lab.idleArt == nil ? "Choose…" : "Change…") { chooseIdleImage() }
+                        Button("Choose…") { chooseIdleImage() }
                         if lab.idleArt != nil {
                             Button("Remove") { lab.clearIdleImage() }
                         }
                     }
                 }
             } footer: {
-                Text("A picture or GIF that sits on the left of the notch when nothing else is showing. Music, agents and live activities still take its place. Best at 64 × 64 pixels or larger, square, with a transparent background. Empty space around the art is trimmed, and GIFs are capped at 300 frames.")
+                Text("Pick one of niche's own, or choose a picture or GIF. It sits on the left of the notch when no music is showing, next to your agents if any are running. Music and live activities take its place. Best at 64 × 64 pixels or larger, square, with a transparent background. Empty space around the art is trimmed, and GIFs are capped at 300 frames.")
             }
             Section {
                 Button("Quit Niche") { NSApp.terminate(nil) }

@@ -8,6 +8,7 @@ rm -rf "$out"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 
 cp vendor/mediaremote-adapter/mediaremote-adapter.pl "$app/Contents/Resources/"
+cp -R idle "$app/Contents/Resources/"
 framework="$app/Contents/Resources/MediaRemoteAdapter.framework"
 cp -R vendor/mediaremote-adapter/MediaRemoteAdapter.framework "$app/Contents/Resources/"
 lipo -thin arm64e -output "$framework/Versions/A/MediaRemoteAdapter" vendor/mediaremote-adapter/MediaRemoteAdapter.framework/Versions/A/MediaRemoteAdapter
@@ -30,8 +31,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
     <key>CFBundleName</key><string>Niche</string>
     <key>CFBundleExecutable</key><string>Niche</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.5.2</string>
-    <key>CFBundleVersion</key><string>23</string>
+    <key>CFBundleShortVersionString</key><string>0.5.3</string>
+    <key>CFBundleVersion</key><string>24</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleIconName</key><string>AppIcon</string>
     <key>LSMinimumSystemVersion</key><string>15.0</string>

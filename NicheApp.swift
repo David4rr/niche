@@ -68,7 +68,8 @@ final class LabState {
         }
         clipboard.onHotKey = { [weak self] in self?.toggleClipboard() }
         if let name = defaults.string(forKey: "idleImage") {
-            idleArt = IdleArt.load(IdleArt.folder.appendingPathComponent(name))
+            let url = name.hasPrefix("builtin:") ? IdleArt.builtIn(String(name.dropFirst(8))) : IdleArt.folder.appendingPathComponent(name)
+            idleArt = url.flatMap(IdleArt.load)
         }
 
         let center = DistributedNotificationCenter.default()
@@ -122,10 +123,26 @@ final class LabState {
         return true
     }
 
-    func clearIdleImage() {
-        if let name = UserDefaults.standard.string(forKey: "idleImage") {
+    var idleBuiltIn: String? {
+        UserDefaults.standard.string(forKey: "idleImage").flatMap { $0.hasPrefix("builtin:") ? String($0.dropFirst(8)) : nil }
+    }
+
+    // the built-ins are read straight from the app bundle, nothing is copied
+    func setIdleBuiltIn(_ name: String) {
+        guard let url = IdleArt.builtIn(name), let art = IdleArt.load(url) else { return }
+        removeIdleCopy()
+        UserDefaults.standard.set("builtin:\(name)", forKey: "idleImage")
+        withAnimation(.spring(Spring(duration: 0.5, bounce: 0.32), blendDuration: 0)) { idleArt = art }
+    }
+
+    private func removeIdleCopy() {
+        if let name = UserDefaults.standard.string(forKey: "idleImage"), !name.hasPrefix("builtin:") {
             try? FileManager.default.removeItem(at: IdleArt.folder.appendingPathComponent(name))
         }
+    }
+
+    func clearIdleImage() {
+        removeIdleCopy()
         UserDefaults.standard.removeObject(forKey: "idleImage")
         withAnimation(.spring(response: 0.45, dampingFraction: 0.95)) { idleArt = nil }
     }

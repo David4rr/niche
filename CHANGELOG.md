@@ -1,5 +1,13 @@
 # changelog
 
+## 0.5.3
+
+five notch pictures built in.
+
+- settings, under general, now has five of niche's own little pixel gifs to pick with one click: pyramid head, a cat, a ghost, a cassette and a campfire. your own picture or gif still works with choose.
+- the built-ins come inside the app, about 30 kb for all five.
+- the agent marks in the closed notch now overlap the right way, claude half behind omp.
+
 ## 0.5.2
 
 - the song artwork in the closed notch now has the same gap on the left and underneath, 5 pt each.

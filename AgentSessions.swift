@@ -457,15 +457,17 @@ struct AgentClosedView: View {
             HStack(spacing: 4) {
                 // one glyph per agent kind, stacked like the feature switcher, the status dot on the front one
                 ZStack(alignment: .leading) {
-                    ForEach(Array(live.enumerated().reversed()), id: \.element) { depth, kind in
-                        AgentGlyph(kind: kind, size: 12)
+                    // later kinds sit further right and on top, with a black ring cutting into the one behind
+                    ForEach(Array(live.enumerated()), id: \.element) { depth, kind in
+                        AgentGlyph(kind: kind, size: 11)
                             .frame(width: 16, height: 16)
                             .background(Circle().fill(.black))
-                            .offset(x: CGFloat(depth) * 7)
+                            .offset(x: CGFloat(depth) * 10)
+                            .zIndex(Double(depth))
                             .transition(.scale(scale: 0.5).combined(with: .opacity))
                     }
                 }
-                .frame(width: 16 + CGFloat(max(live.count - 1, 0)) * 7, alignment: .leading)
+                .frame(width: 16 + CGFloat(max(live.count - 1, 0)) * 10, alignment: .leading)
                 .overlay(alignment: .bottomTrailing) {
                     StatusDot(working: working > 0).offset(x: 2, y: 2)
                 }

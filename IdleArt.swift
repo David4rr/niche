@@ -14,6 +14,13 @@ struct IdleArt {
     private static let maxFrames = 300
     private static let pixels = 64
 
+    // the built-in gifs shipped in the app's resources, in the order the settings picker shows them
+    static let builtIns = ["pyramid-head", "cat", "ghost", "cassette", "campfire"]
+
+    static func builtIn(_ name: String) -> URL? {
+        Bundle.main.url(forResource: name, withExtension: "gif", subdirectory: "idle")
+    }
+
     static var folder: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Niche")
     }
