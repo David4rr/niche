@@ -601,7 +601,7 @@ struct FeatureLogo: View {
 struct LockIndicator: View {
     let state: LabState.LockState
     let isShown: Bool
-    @State private var lift: CGFloat = 1.6
+    @State private var lift: CGFloat = 0.8
     @State private var swing: Double = 180
     @State private var squash: CGFloat = 1
     @State private var appeared = false
@@ -611,7 +611,9 @@ struct LockIndicator: View {
             ZStack(alignment: .bottom) {
                 Shackle()
                     .stroke(.white, style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
-                    .frame(width: 6, height: 8)
+                    // swung open, the shackle hangs off the body's right side with nothing to hide its legs, so
+                    // it narrows and shortens as it swings: the open lock stays as compact as the closed one
+                    .frame(width: 6 - 1.2 * swing / 180, height: 8 - 2 * swing / 180)
                     .rotation3DEffect(.degrees(swing), axis: (x: 0, y: 1, z: 0), anchor: .trailing, perspective: 0)
                     .offset(y: -4.1 - lift)
                 RoundedRectangle(cornerRadius: 1.9)
@@ -649,7 +651,7 @@ struct LockIndicator: View {
         try? await Task.sleep(for: .seconds(0.06))
         withAnimation(.spring(response: 0.28, dampingFraction: 0.4)) {
             squash = 1
-            lift = 2
+            lift = 0.8
         }
         try? await Task.sleep(for: .seconds(0.1))
         withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) { swing = 180 }

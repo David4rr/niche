@@ -1,5 +1,9 @@
 # changelog
 
+## 0.5.8
+
+- the open padlock is more compact: its shackle is shorter and narrower once it swings open, and pops up less, so the unlocked lock is about the same size as the locked one.
+
 ## 0.5.7
 
 - with two kinds of agent running, the closed notch now grows only on the side that needs room, instead of both. the picture side keeps its usual width, and nothing sits under the camera anymore.
