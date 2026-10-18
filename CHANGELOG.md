@@ -1,5 +1,9 @@
 # changelog
 
+## 0.3.7.3
+
+- the volume, brightness and lock icons in the notch are smaller, so they sit in proportion with the artwork and the level bar.
+
 ## 0.3.7.2
 
 - locking is no longer instant: the open padlock blurs in, holds for a beat, then the shackle swings over and snaps shut.

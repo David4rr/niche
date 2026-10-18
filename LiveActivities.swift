@@ -512,9 +512,9 @@ struct LiveActivityView: View {
 
     private func symbol(_ name: String, tint: Color, value: Double) -> some View {
         Image(systemName: name, variableValue: value)
-            .font(.system(size: 13, weight: .semibold))
+            .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(tint)
-            .frame(width: 18)
+            .frame(width: 16)
     }
 
     private func label(_ text: String) -> some View {
@@ -537,17 +537,17 @@ private struct SunGlyph: View {
     var body: some View {
         let level = min(max(level, 0), 1)
         ZStack {
-            Circle().frame(width: 6 + 1.5 * level, height: 6 + 1.5 * level)
+            Circle().frame(width: 4.6 + 1.2 * level, height: 4.6 + 1.2 * level)
             ForEach(0..<8, id: \.self) { i in
                 Capsule()
-                    .frame(width: 1.8, height: 1.6 + 2.4 * level)
-                    .offset(y: -(6 + 1.9 * level))
+                    .frame(width: 1.4, height: 1.2 + 1.8 * level)
+                    .offset(y: -(4.6 + 1.5 * level))
                     .rotationEffect(.degrees(Double(i) * 45))
                     .opacity(min(max(level * 8 - Double(i), 0.3), 1))
             }
         }
         .foregroundStyle(.yellow)
-        .frame(width: 18, height: 18)
+        .frame(width: 16, height: 16)
         .animation(.smooth(duration: 0.25), value: level)
     }
 }

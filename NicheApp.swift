@@ -418,7 +418,7 @@ struct FeatureLogo: View {
 struct LockIndicator: View {
     let state: LabState.LockState
     let isShown: Bool
-    @State private var lift: CGFloat = 2
+    @State private var lift: CGFloat = 1.6
     @State private var swing: Double = 180
     @State private var squash: CGFloat = 1
     @State private var appeared = false
@@ -427,16 +427,16 @@ struct LockIndicator: View {
         HStack(spacing: 0) {
             ZStack(alignment: .bottom) {
                 Shackle()
-                    .stroke(.white, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                    .frame(width: 6.5, height: 6.5)
+                    .stroke(.white, style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
+                    .frame(width: 6, height: 6)
                     .rotation3DEffect(.degrees(swing), axis: (x: 0, y: 1, z: 0), anchor: .trailing, perspective: 0)
-                    .offset(y: -4.5 - lift)
-                RoundedRectangle(cornerRadius: 2)
+                    .offset(y: -4.1 - lift)
+                RoundedRectangle(cornerRadius: 1.9)
                     .fill(.white)
-                    .frame(width: 9.5, height: 7)
+                    .frame(width: 8.8, height: 6.6)
                     .scaleEffect(x: 2 - squash, y: squash, anchor: .bottom)
             }
-            .frame(width: 14, height: 13, alignment: .bottom)
+            .frame(width: 13, height: 12, alignment: .bottom)
             .frame(width: MusicClosedView.slot)
             Spacer(minLength: 0)
         }
@@ -466,7 +466,7 @@ struct LockIndicator: View {
         try? await Task.sleep(for: .seconds(0.06))
         withAnimation(.spring(response: 0.28, dampingFraction: 0.4)) {
             squash = 1
-            lift = 2.5
+            lift = 2
         }
         try? await Task.sleep(for: .seconds(0.1))
         withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) { swing = 180 }
