@@ -2,20 +2,35 @@ import AppKit
 @preconcurrency import IOBluetooth
 import SwiftUI
 
-enum ListeningMode: Int {
-    case off = 1, noiseCancellation, transparency, adaptive
+enum ListeningMode {
+    case off, noiseCancellation, transparency, adaptive
 
-    var symbol: String {
+    init?(controlCenter name: String) {
+        if name.contains("noise-cancellation") { self = .noiseCancellation }
+        else if name.contains("transparency") { self = .transparency }
+        else if name.contains("adaptive") || name.contains("automatic") { self = .adaptive }
+        else if name.contains("off") || name.contains("normal") { self = .off }
+        else { return nil }
+    }
+
+    private var symbol: (name: String, fallback: String) {
         switch self {
-        case .off: "person.crop.circle"
-        case .noiseCancellation: "person.crop.circle.fill"
-        case .transparency: "person.wave.2.fill"
-        case .adaptive: "sparkles"
+        case .off: ("person.fill", "person.fill")
+        case .noiseCancellation: ("person.closed.fill", "person.crop.circle.fill")
+        case .transparency: ("person.open.fill", "person.wave.2.fill")
+        case .adaptive: ("person.and.sparkles.fill", "sparkles")
         }
     }
 
-    var tint: Color {
-        self == .off ? .white.opacity(0.5) : Color(red: 0.55, green: 0.76, blue: 1)
+    var image: NSImage {
+        let loader = NSSelectorFromString("imageWithPrivateSystemSymbolName:")
+        let found = NSImage.responds(to: loader)
+            ? (NSImage.self as AnyObject).perform(loader, with: symbol.name)?.takeUnretainedValue() as? NSImage : nil
+        let base = found ?? NSImage(systemSymbolName: symbol.fallback, accessibilityDescription: nil) ?? NSImage()
+        let tint = self == .off ? NSColor.white.withAlphaComponent(0.5) : NSColor.white
+        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
+            .applying(.init(paletteColors: [tint, tint.withAlphaComponent(tint.alphaComponent * 0.55)]))
+        return base.withSymbolConfiguration(config) ?? base
     }
 }
 
@@ -30,8 +45,7 @@ final class HeadphonesWatcher: NSObject {
     private var disconnectNotes: [String: IOBluetoothUserNotification] = [:]
     private var devices: [String: IOBluetoothDevice] = [:]
     private var batteries: [String: Double] = [:]
-    private var modes: [String: ListeningMode] = [:]
-    private var modeObserver: NSObjectProtocol?
+    private var modeProcess: Process?
     private var batteryTimer: Timer?
     private var startedAt = Date.distantPast
 
@@ -47,11 +61,7 @@ final class HeadphonesWatcher: NSObject {
     func start() {
         startedAt = Date()
         connectNote = IOBluetoothDevice.register(forConnectNotifications: self, selector: #selector(connected(_:device:)))
-        modeObserver = NotificationCenter.default.addObserver(forName: Notification.Name("IOBluetoothDeviceListeningModeChanged"),
-                                                              object: nil, queue: .main) { [weak self] note in
-            guard let device = note.object as? IOBluetoothDevice else { return }
-            MainActor.assumeIsolated { self?.modeChanged(device) }
-        }
+        watchModes()
         batteryTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.checkBatteries() }
         }
@@ -64,9 +74,9 @@ final class HeadphonesWatcher: NSObject {
         disconnectNotes = [:]
         devices = [:]
         batteries = [:]
-        modes = [:]
-        if let modeObserver { NotificationCenter.default.removeObserver(modeObserver) }
-        modeObserver = nil
+        modeProcess?.terminationHandler = nil
+        modeProcess?.terminate()
+        modeProcess = nil
         batteryTimer?.invalidate()
         batteryTimer = nil
     }
@@ -101,15 +111,44 @@ final class HeadphonesWatcher: NSObject {
         guard let address = device.addressString, devices.removeValue(forKey: address) != nil else { return }
         disconnectNotes.removeValue(forKey: address)?.unregister()
         batteries[address] = nil
-        modes[address] = nil
         onDisconnect?(device.name ?? "")
     }
 
-    private func modeChanged(_ device: IOBluetoothDevice) {
-        guard let address = device.addressString, devices[address] != nil,
-              let mode = ListeningMode(rawValue: Self.read(device, "listeningMode")), modes[address] != mode else { return }
-        modes[address] = mode
-        onMode?(device.name ?? "", mode)
+    private func watchModes() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/log")
+        process.arguments = ["stream", "--style", "ndjson", "--predicate",
+                             "process == \"ControlCenter\" AND eventMessage BEGINSWITH \"Showing listening mode banner\""]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        readLines(from: pipe.fileHandleForReading, label: "niche.listening") { [weak self] line in
+            guard let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                  let message = json["eventMessage"] as? String,
+                  let match = message.firstMatch(of: #/mode: ([A-Za-z-]+)/#),
+                  let mode = ListeningMode(controlCenter: String(match.1)) else { return }
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.modeChanged(mode) } }
+        }
+        process.terminationHandler = { [weak self] _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                MainActor.assumeIsolated {
+                    guard let self, self.modeProcess === process else { return }
+                    self.watchModes()
+                }
+            }
+        }
+        do {
+            try process.run()
+        } catch {
+            NSLog("Niche could not start the listening mode log stream: %@", String(describing: error))
+            return
+        }
+        modeProcess = process
+    }
+
+    private func modeChanged(_ mode: ListeningMode) {
+        let name = devices.values.compactMap(\.name).first { $0.lowercased().contains("airpods") } ?? devices.values.first?.name ?? "AirPods"
+        onMode?(name, mode)
     }
 
     private func checkBatteries() {
@@ -237,18 +276,22 @@ struct BatteryRing: View {
 
 struct ListeningModeGlyph: View {
     let mode: ListeningMode
-    @State private var bounces = 0
+    @State private var plays = 0
 
     var body: some View {
-        Image(systemName: mode.symbol)
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(mode.tint)
-            .contentTransition(.symbolEffect(.replace.downUp.wholeSymbol))
-            .symbolEffect(.variableColor.iterative.reversing, isActive: mode == .transparency || mode == .adaptive)
-            .symbolEffect(.bounce, value: bounces)
+        Image(nsImage: mode.image)
+            .keyframeAnimator(initialValue: 1.0, trigger: plays) { content, scale in
+                content.scaleEffect(scale)
+            } keyframes: { _ in
+                MoveKeyframe(0.6)
+                SpringKeyframe(1.15, duration: 0.2, spring: Spring(duration: 0.2, bounce: 0))
+                SpringKeyframe(1, duration: 0.4, spring: Spring(duration: 0.4, bounce: 0.32))
+            }
+            .id(mode)
+            .transition(.blurReplace)
             .animation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0), value: mode)
-            .frame(width: 18, height: 16)
-            .onAppear { bounces += 1 }
-            .onChange(of: mode) { bounces += 1 }
+            .frame(width: 20, height: 18)
+            .onAppear { plays += 1 }
+            .onChange(of: mode) { plays += 1 }
     }
 }

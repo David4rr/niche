@@ -1,5 +1,11 @@
 # changelog
 
+## 0.6.5
+
+- the noise control activity works: niche follows the same change that makes macOS show its own noise control banner, so switching modes from control center or the stem now shows in the notch. taking a bud out (which also switches the mode) doesn't.
+- the noise control icons are apple's own, the same ones as the listening mode menu: a ringed head for noise cancellation, a dotted halo for transparency, sparkles for adaptive, a plain head for off.
+- memory: about 19 mb after launch, same as 0.6.4 measured side by side. the download stays 2.4 mb.
+
 ## 0.6.4
 
 - the music player is more compact: a narrower open notch, smaller title and artist, and a thicker progress bar tinted with the artwork's colours.

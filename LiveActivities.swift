@@ -113,6 +113,7 @@ final class LiveActivityCenter {
     }
 
     func stop() {
+        headphones?.stop()
         focusProcess?.terminationHandler = nil
         focusProcess?.terminate()
         focusProcess = nil
