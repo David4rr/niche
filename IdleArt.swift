@@ -3,8 +3,6 @@ import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
 
-// the picture the user pins to the left of the notch when nothing else is showing. a gif keeps its
-// own timing; every frame is shrunk once to the slot's size so a big gif costs almost nothing
 struct IdleArt {
     let frames: [CGImage]
     let delays: [Double]
@@ -14,7 +12,6 @@ struct IdleArt {
     private static let maxFrames = 300
     private static let pixels = 64
 
-    // the built-in gifs shipped in the app's resources, in the order the settings picker shows them
     static let builtIns = ["pyramid-head", "cat", "ghost", "cassette", "campfire"]
 
     static func builtIn(_ name: String) -> URL? {
@@ -36,12 +33,9 @@ struct IdleArt {
             let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
             let gif = properties?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
             let delay = (gif?[kCGImagePropertyGIFUnclampedDelayTime] as? Double) ?? (gif?[kCGImagePropertyGIFDelayTime] as? Double) ?? 0.1
-            // browsers treat tiny gif delays as 0.1 s, so the same gif plays at the same speed here
             delays.append(delay < 0.02 ? 0.1 : delay)
         }
         guard !frames.isEmpty else { return nil }
-        // trim the empty margin around the art (same box for every frame, so it doesn't jitter) and
-        // pad it back to a square, so a small figure in a big transparent canvas still fills the slot
         let box = frames.compactMap(Self.opaqueBounds).reduce(CGRect.null) { $0.union($1) }
         if !box.isNull {
             let side = Int(max(box.width, box.height))
@@ -62,7 +56,6 @@ struct IdleArt {
             minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
         } }
         guard maxX >= minX else { return nil }
-        // context rows run bottom-up, image coordinates top-down
         return CGRect(x: minX, y: h - 1 - maxY, width: maxX - minX + 1, height: maxY - minY + 1)
     }
 
@@ -114,7 +107,6 @@ struct IdleClosedView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // same box as the song artwork: 24 pt, 5 pt from the notch's edge and bottom
             IdleArtView(art: art, size: 24, cornerRadius: 7)
                 .offset(y: -1)
                 .padding(.leading, 5)

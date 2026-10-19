@@ -1,5 +1,18 @@
 # changelog
 
+## 0.6.4
+
+- the music player is more compact: a narrower open notch, smaller title and artist, and a thicker progress bar tinted with the artwork's colours.
+- the repeat button is replaced by the output device: macbook speakers, headphones, airpods, a homepod or other speaker. clicking it opens a volume slider under the controls; the speaker on its left mutes. while the slider is open, volume changes don't pop the volume activity.
+- every control reacts: a soft square under the hovered button and a small squash when pressed. skip slides one arrow out and a new one in, play and pause shrink into each other, and shuffle lifts with a dot under it when on.
+- a new song flips the cover: the old one folds to a sliver and the new one unfolds from it, blurred, then sharpens.
+- the open agents list is only as tall as its sessions. with more than 4, clicking "+n more" grows the notch to show them all, and "show less" folds it back. the status pill no longer gets cut off.
+- airpods live activities: connecting drops the buds in with a little tilt and sweeps a battery ring to the lowest bud's charge, disconnecting dims them and draws a slash with "off". a noise control change shows the new mode (noise cancellation, transparency, adaptive, off), and a bud dropping to 20 % and 10 % shows a pulsing red ring. each has its own switch under settings, live activities. niche asks for bluetooth permission once for this.
+- the brightness activity only shows after a brightness key press. the screen dimming by itself (idle dim, auto-brightness, unplugging) no longer pops it.
+- battery activities (charging, fully charged, low battery) get a slightly wider right ear, so "100%" no longer runs into the notch's edge.
+- the clipboard is out of the feature switcher: it only opens with its shortcut (control-command-v). hovering never opens it.
+- memory: about 20 mb right after launch, the airpods watcher adds no measurable cost. the download is 2.4 mb (2.3 mb in 0.6.3).
+
 ## 0.6.3
 
 - niche takes over the brightness keys again, so the system brightness popup is gone and only the notch shows the change.

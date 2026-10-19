@@ -37,7 +37,6 @@ final class LabState {
     let liveActivities = LiveActivityCenter()
     let clipboard = ClipboardHistory()
     private(set) var idleArt: IdleArt?
-    // clipboard is never a closed-notch feature or part of the switcher: it is only peeked at
     enum Feature: CaseIterable { case music, agents, clipboard }
     var selectedFeature: Feature?
     var peekFeature: Feature?
@@ -66,6 +65,7 @@ final class LabState {
             self.liveActivities.copied(icon: item.app, image: item.image, color: Self.color(for: item), symbol: Self.symbol(for: item.kind))
         }
         clipboard.onHotKey = { [weak self] in self?.toggleClipboard() }
+        liveActivities.showsVolume = { [unowned self] in volumeRoom == 0 }
         if let name = defaults.string(forKey: "idleImage") {
             let url = name.hasPrefix("builtin:") ? IdleArt.builtIn(String(name.dropFirst(8))) : IdleArt.folder.appendingPathComponent(name)
             idleArt = url.flatMap(IdleArt.load)
@@ -96,11 +96,10 @@ final class LabState {
     static func closedSize(hasContent: Bool) -> CGSize {
         CGSize(width: hardwareNotch.width + (hasContent ? 2 * MusicClosedView.slot : 0), height: hardwareNotch.height)
     }
-    static let openSize = CGSize(width: hardwareNotch.width + 200, height: 175)
+    static let openSize = CGSize(width: hardwareNotch.width + 160, height: 175)
 
     var hasClosedContent: Bool { shownFeature != nil || idleArt != nil || lockState != .none || liveActivities.current != nil }
 
-    // copies the picked file into niche's own folder, so moving or deleting the original changes nothing
     func setIdleImage(_ url: URL) -> Bool {
         let folder = IdleArt.folder
         let name = "idle.\(url.pathExtension.lowercased())"
@@ -126,7 +125,6 @@ final class LabState {
         UserDefaults.standard.string(forKey: "idleImage").flatMap { $0.hasPrefix("builtin:") ? String($0.dropFirst(8)) : nil }
     }
 
-    // the built-ins are read straight from the app bundle, nothing is copied
     func setIdleBuiltIn(_ name: String) {
         guard let url = IdleArt.builtIn(name), let art = IdleArt.load(url) else { return }
         removeIdleCopy()
@@ -145,25 +143,39 @@ final class LabState {
         UserDefaults.standard.removeObject(forKey: "idleImage")
         withAnimation(.spring(response: 0.45, dampingFraction: 0.95)) { idleArt = nil }
     }
-    var hasOpenableContent: Bool { player.track != nil || !agents.isEmpty || !clipboard.items.isEmpty }
+    var showsAllAgents = false
+    var hasOpenableContent: Bool { player.track != nil || !agents.isEmpty || peekFeature == .clipboard }
 
     var activityRoom: CGFloat {
         controller.isExpanded && liveActivities.current != nil && openFeature != .agents && openFeature != .clipboard
             ? Self.hardwareNotch.height + 4 - 18 : 0
     }
 
+    var volumeRoom: CGFloat {
+        controller.isExpanded && openFeature != .agents && openFeature != .clipboard
+            && player.track != nil && player.output.isShowingVolume ? 32 : 0
+    }
+
+    var agentsHeight: CGFloat {
+        let count = agents.sessions.count
+        let rows = showsAllAgents ? count : min(count, AgentSessionList.visibleRows)
+        let more = count > AgentSessionList.visibleRows ? AgentSessionList.spacing + AgentSessionList.moreHeight : 0
+        let list = CGFloat(rows) * AgentSessionList.rowHeight + CGFloat(max(rows - 1, 0)) * AgentSessionList.spacing + more
+        return Self.hardwareNotch.height + 2 + list + 16
+    }
+
     var currentSize: CGSize {
+        if controller.isExpanded && openFeature == .agents {
+            return CGSize(width: Self.openSize.width, height: agentsHeight)
+        }
         if controller.isExpanded {
-            return CGSize(width: Self.openSize.width, height: Self.openSize.height + activityRoom)
+            return CGSize(width: Self.openSize.width, height: Self.openSize.height + activityRoom + volumeRoom)
         }
         let size = Self.closedSize(hasContent: hasClosedContent)
         let room = agentsRoom
         return CGSize(width: size.width + room.left + room.right + levelRoom, height: size.height)
     }
 
-    // room the closed agent view needs past the usual slots, per side. the camera sits in the middle of
-    // the notch where nothing can be drawn, so content must stay inside the slots: with a picture the
-    // agent marks and count sit on the right, without one the marks sit on the left
     var agentsRoom: (left: CGFloat, right: CGFloat) {
         guard !controller.isExpanded, lockState == .none, liveActivities.current == nil, shownFeature == .agents else { return (0, 0) }
         let kinds = AgentKind.allCases.filter { !agents.sessions(of: $0).isEmpty }.count
@@ -171,14 +183,11 @@ final class LabState {
         return idleArt != nil ? (0, 26) : (10, 0)
     }
 
-    // a volume or brightness bar gets a longer right ear, so its gap to the notch edge matches the icon's
     var levelRoom: CGFloat {
-        guard !controller.isExpanded, lockState == .none,
-              let kind = liveActivities.current?.kind, kind == .volume || kind == .brightness else { return 0 }
-        return LiveActivityView.levelRoom
+        guard !controller.isExpanded, lockState == .none, let activity = liveActivities.current else { return 0 }
+        return LiveActivityView.room(for: activity)
     }
 
-    // growing one side only moves the notch's centre off the camera, so it is shifted back by half
     var closedOffset: CGFloat {
         let room = agentsRoom
         return (room.right + levelRoom - room.left) / 2
@@ -202,30 +211,21 @@ final class LabState {
     var openFeature: Feature? {
         if peekFeature == .clipboard && !clipboard.items.isEmpty { return .clipboard }
         if let feature = peekFeature, activeFeatures.contains(feature) { return feature }
-        return shownFeature ?? (clipboard.items.isEmpty ? nil : .clipboard)
+        return shownFeature
     }
 
-    // the switcher is the only way between features in the open notch. the clipboard rides along in it,
-    // but only as a peek: it has no closed view, so it never becomes what the notch shows
     var upcomingFeatures: [Feature] {
-        let live = activeFeatures + (clipboard.items.isEmpty ? [] : [.clipboard])
+        let live = activeFeatures
         guard let current = openFeature, let index = live.firstIndex(of: current) else { return [] }
         return (1..<live.count).map { live[(index + $0) % live.count] }
     }
 
     func switchFeature() {
         guard let next = upcomingFeatures.first else { return }
-        if next == .clipboard {
-            peekFeature = .clipboard
-        } else {
-            peekFeature = nil
-            selectedFeature = next
-        }
+        peekFeature = nil
+        selectedFeature = next
     }
 
-
-
-    // the shortcut opens the clipboard with the keys on it, or closes it again
     func toggleClipboard() {
         guard lockState == .none, !clipboard.items.isEmpty else { return }
         if controller.isExpanded && openFeature == .clipboard {
@@ -245,7 +245,6 @@ final class LabState {
             liveActivities.copied(icon: item.app, image: item.image, color: Self.color(for: item), symbol: Self.symbol(for: item.kind))
             return
         }
-        // the key window has to hand the keys back to the app first
         Task {
             try? await Task.sleep(for: .seconds(0.12))
             for down in [true, false] {
@@ -341,6 +340,8 @@ final class LabState {
         } else {
             c.collapse()
             peekFeature = nil
+            player.output.isShowingVolume = false
+            showsAllAgents = false
             clipboard.setKeyboard(false)
             setKeyCapture?(false)
             Task {
@@ -367,17 +368,16 @@ struct NicheView: View {
                 NotchShape(topCornerRadius: radii.top, bottomCornerRadius: radii.bottom)
                     .fill(.black)
                 if c.isExpanded {
-                    // a real container (not a Group), so the frame, top row and fade belong to the open notch
-                    // as a whole and stay put; only the pane inside changes when the switcher is used
                     ZStack(alignment: .top) {
                         Group {
                             if lab.openFeature == .agents {
-                                AgentSessionList(sessions: lab.agents.sessions) { session in
+                                AgentSessionList(sessions: lab.agents.sessions, showsAll: lab.showsAllAgents, onToggleAll: {
+                                    withAnimation(.spring(Spring(duration: 0.4, bounce: 0.2), blendDuration: 0)) { lab.showsAllAgents.toggle() }
+                                }) { session in
                                     lab.agents.focus(session)
                                     lab.setOpen(false)
                                 }
-                                    .frame(width: LabState.openSize.width - 2 * 18,
-                                           height: LabState.openSize.height - LabState.hardwareNotch.height - 16, alignment: .top)
+                                    .frame(width: LabState.openSize.width - 2 * 18, alignment: .top)
                                     .padding(.top, LabState.hardwareNotch.height + 2)
                             } else if lab.openFeature == .clipboard {
                                 ClipboardView(history: lab.clipboard) { lab.pick($0) }
@@ -507,14 +507,12 @@ struct NicheView: View {
     }
 
     private var ears: some View {
-        // only the switcher sits up here, in the right ear clear of the camera
         HStack(spacing: 4) {
             Spacer(minLength: 0)
             let upcoming = lab.upcomingFeatures
             if !upcoming.isEmpty, let current = lab.openFeature {
                 let stack = upcoming + [current]
                 Button {
-                    // the front card hops up and slides to the back while the next one comes forward
                     hop = stack.first
                     withAnimation(.spring(Spring(duration: 0.45, bounce: 0.3), blendDuration: 0)) { lab.switchFeature() }
                     Task {
@@ -523,7 +521,6 @@ struct NicheView: View {
                     }
                 } label: {
                     ZStack {
-                        // fixed order and identity, so cards slide between depths instead of being rebuilt
                         ForEach(LabState.Feature.allCases.filter(stack.contains), id: \.self) { feature in
                             let depth = CGFloat(stack.firstIndex(of: feature) ?? 0)
                             FeatureLogo(feature: feature)
@@ -603,8 +600,6 @@ struct LockIndicator: View {
             ZStack(alignment: .bottom) {
                 Shackle()
                     .stroke(.white, style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
-                    // swung open, the shackle hangs off the body's right side with nothing to hide its legs, so
-                    // it narrows and shortens as it swings: the open lock stays as compact as the closed one
                     .frame(width: 6 - 1.2 * swing / 180, height: 8 - 2 * swing / 180)
                     .rotation3DEffect(.degrees(swing), axis: (x: 0, y: 1, z: 0), anchor: .trailing, perspective: 0)
                     .offset(y: -4.1 - lift)
@@ -727,6 +722,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         trackSettings()
 
         lab.player.start()
+        lab.player.output.start()
         lab.agents.start()
         lab.updater.start()
         lab.liveActivities.start()
@@ -737,7 +733,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lab.setKeyCapture = { [weak catcher] on in
             if on { catcher?.makeKeyAndOrderFront(nil) } else { catcher?.orderOut(nil) }
         }
-        // clicking anywhere else takes the keys away, and that closes the clipboard too
         monitors.append(NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: catcher, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.lab.clipboard.isKeyboard else { return }

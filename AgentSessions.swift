@@ -330,7 +330,6 @@ struct AgentGlyph: View {
     var body: some View {
         switch kind {
         case .claude:
-            // the star's symbol runs edge to edge, the π has side bearing; these sizes make them read equal
             Image(systemName: "staroflife.fill")
                 .font(.system(size: size * 0.82, weight: .bold))
                 .foregroundStyle(Color(red: 0.85, green: 0.47, blue: 0.34))
@@ -373,22 +372,47 @@ struct AgentIndicator: View {
 
 struct AgentSessionList: View {
     let sessions: [AgentSession]
+    let showsAll: Bool
+    let onToggleAll: () -> Void
     let onSelect: (AgentSession) -> Void
-    private let visibleRows = 4
+    static let visibleRows = 4
+    static let rowHeight: CGFloat = 22
+    static let spacing: CGFloat = 4
+    static let moreHeight: CGFloat = 12
 
     var body: some View {
-        VStack(spacing: 4) {
-            ForEach(sessions.prefix(visibleRows)) { session in
+        VStack(spacing: Self.spacing) {
+            ForEach(sessions.prefix(showsAll ? sessions.count : Self.visibleRows)) { session in
                 AgentSessionRow(session: session) { onSelect(session) }
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
-            if sessions.count > visibleRows {
-                Text("+\(sessions.count - visibleRows) more")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.45))
+            if sessions.count > Self.visibleRows {
+                MoreButton(title: showsAll ? "Show less" : "+\(sessions.count - Self.visibleRows) more", action: onToggleAll)
+                    .frame(height: Self.moreHeight)
             }
         }
         .foregroundStyle(.white)
+    }
+}
+
+private struct MoreButton: View {
+    let title: String
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.white.opacity(isHovered ? 0.8 : 0.45))
+                .contentTransition(.interpolate)
+                .padding(.horizontal, 8)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
     }
 }
 
@@ -402,7 +426,6 @@ struct AgentSessionRow: View {
         let tint = working ? Color.green : Color.orange
         Button(action: action) {
             HStack(spacing: 8) {
-                // claude and omp share one list, so each row leads with its own mark
                 AgentIndicator(kind: session.kind, sessions: [session])
                     .frame(width: 16)
                 Text(session.title ?? session.project)
@@ -428,9 +451,10 @@ struct AgentSessionRow: View {
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
                     .background(Capsule().fill(tint.opacity(0.15)))
+                    .fixedSize()
             }
             .padding(.horizontal, 9)
-            .frame(height: 22)
+            .frame(height: AgentSessionList.rowHeight)
             .background(RoundedRectangle(cornerRadius: 7).fill(.white.opacity(isHovered ? 0.14 : 0.06)))
             .contentShape(RoundedRectangle(cornerRadius: 7))
         }
@@ -442,8 +466,6 @@ struct AgentSessionRow: View {
 
 struct AgentClosedView: View {
     let monitor: AgentMonitor
-    // with a notch picture: picture on the left, every agent kind with its own dot plus the count on the
-    // right. without one: the agent marks on the left, one status dot and the count on the right
     let art: IdleArt?
     @State private var lastSessions: [AgentSession] = []
 

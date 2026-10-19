@@ -23,10 +23,10 @@ final class MusicPlayer {
     private(set) var track: Track?
     private(set) var isPlaying = false
     private(set) var isShuffled = false
-    private(set) var repeatMode = 1
     private(set) var position: Double = 0
     private(set) var songChangeToken = 0
     let spectrum = AudioSpectrum()
+    let output = OutputDevice()
 
     @ObservationIgnored private var elapsedAtTimestamp: Double = 0
     @ObservationIgnored private var timestamp = Date()
@@ -39,20 +39,17 @@ final class MusicPlayer {
     @ObservationIgnored private let send: @convention(c) (Int, AnyObject?) -> Bool
     @ObservationIgnored private let setElapsed: @convention(c) (Double) -> Void
     @ObservationIgnored private let setShuffle: @convention(c) (Int) -> Void
-    @ObservationIgnored private let setRepeat: @convention(c) (Int) -> Void
 
     init() {
         guard let handle = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_NOW),
               let send = dlsym(handle, "MRMediaRemoteSendCommand"),
               let setElapsed = dlsym(handle, "MRMediaRemoteSetElapsedTime"),
-              let setShuffle = dlsym(handle, "MRMediaRemoteSetShuffleMode"),
-              let setRepeat = dlsym(handle, "MRMediaRemoteSetRepeatMode") else {
+              let setShuffle = dlsym(handle, "MRMediaRemoteSetShuffleMode") else {
             fatalError("MediaRemote.framework symbols not found")
         }
         self.send = unsafeBitCast(send, to: (@convention(c) (Int, AnyObject?) -> Bool).self)
         self.setElapsed = unsafeBitCast(setElapsed, to: (@convention(c) (Double) -> Void).self)
         self.setShuffle = unsafeBitCast(setShuffle, to: (@convention(c) (Int) -> Void).self)
-        self.setRepeat = unsafeBitCast(setRepeat, to: (@convention(c) (Int) -> Void).self)
     }
 
     func start() {
@@ -88,8 +85,6 @@ final class MusicPlayer {
     }
 
     private func apply(_ snapshot: NowPlayingSnapshot) {
-        // while a song changes, now playing can report nothing for a moment. only clear the track if it
-        // stays empty, otherwise the notch flashes to its empty state between songs
         guard let next = snapshot.track else {
             guard track != nil, clearTask == nil else { return }
             clearTask = Task { [weak self] in
@@ -108,7 +103,6 @@ final class MusicPlayer {
         clearTask = nil
         isPlaying = snapshot.isPlaying
         if let shuffle = snapshot.shuffleMode { isShuffled = shuffle != 1 }
-        if let mode = snapshot.repeatMode { repeatMode = mode }
         elapsedAtTimestamp = snapshot.elapsed
         timestamp = snapshot.timestamp
         rate = snapshot.rate
@@ -163,12 +157,6 @@ final class MusicPlayer {
         setShuffle(isShuffled ? 1 : 3)
         isShuffled.toggle()
     }
-
-    func cycleRepeat() {
-        let next = repeatMode == 1 ? 3 : repeatMode - 1
-        setRepeat(next)
-        repeatMode = next
-    }
 }
 
 func readLines(from handle: FileHandle, label: String, line: @escaping @Sendable (Data) -> Void) {
@@ -193,14 +181,11 @@ private struct NowPlayingSnapshot: @unchecked Sendable {
     let timestamp: Date
     let rate: Double
     let shuffleMode: Int?
-    let repeatMode: Int?
     let pid: pid_t?
 
     nonisolated(unsafe) private static let iso: ISO8601DateFormatter = ISO8601DateFormatter()
     nonisolated(unsafe) private static var cachedArtwork: (key: String, image: NSImage?) = ("", nil)
 
-    // every app that can open web links: a tab with video or audio (even a paused one, or a page that
-    // only touched the media api) is not music, so browsers never take the notch
     private static let browsers: Set<String> = {
         guard let web = URL(string: "https://example.com") else { return [] }
         return Set(NSWorkspace.shared.urlsForApplications(toOpen: web).compactMap { Bundle(url: $0)?.bundleIdentifier })
@@ -228,7 +213,6 @@ private struct NowPlayingSnapshot: @unchecked Sendable {
         timestamp = (p["timestamp"] as? String).flatMap { Self.iso.date(from: $0) } ?? Date()
         rate = p["playbackRate"] as? Double ?? 1
         shuffleMode = p["shuffleMode"] as? Int
-        repeatMode = p["repeatMode"] as? Int
         pid = (p["processIdentifier"] as? Int).map { pid_t($0) }
     }
 
@@ -269,9 +253,8 @@ struct ArtworkSwap: ViewModifier, Animatable {
     func body(content: Content) -> some View {
         let p = progress
         content
-            .scaleEffect(incoming ? 0.86 + 0.14 * p : 1 - 0.1 * p)
-            .blur(radius: incoming ? 6 * (1 - p) : 4 * p)
-            .opacity(incoming ? p : 1 - p)
+            .scaleEffect(x: incoming ? 0.06 + 0.94 * p : 1 - 0.94 * p, y: 1)
+            .blur(radius: incoming ? 7 * max(0, 1 - p).squareRoot() : 0)
     }
 }
 
@@ -289,11 +272,13 @@ struct ArtworkView: View {
     var body: some View {
         ZStack {
             if let outgoing {
-                ArtworkTile(track: outgoing).modifier(ArtworkSwap(progress: outgoingProgress, incoming: false))
+                ArtworkTile(track: outgoing).clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                    .modifier(ArtworkSwap(progress: outgoingProgress, incoming: false))
             }
-            ArtworkTile(track: current ?? track).modifier(ArtworkSwap(progress: incomingProgress, incoming: true))
+            ArtworkTile(track: current ?? track).clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .modifier(ArtworkSwap(progress: incomingProgress, incoming: true))
+                .opacity(outgoing == nil ? 1 : 0)
         }
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .scaleEffect(isPlaying ? 1 : 0.82)
         .animation(.spring(Spring(duration: 0.5, bounce: 0.3), blendDuration: 0), value: isPlaying)
         .onAppear { current = track }
@@ -306,11 +291,11 @@ struct ArtworkView: View {
             current = track
             outgoingProgress = 0
             incomingProgress = 0
-            withAnimation(.easeIn(duration: 0.18)) {
+            withAnimation(.easeIn(duration: 0.1)) {
                 outgoingProgress = 1
             } completion: {
                 outgoing = nil
-                withAnimation(.spring(Spring(duration: 0.38, bounce: 0.25), blendDuration: 0)) {
+                withAnimation(.spring(Spring(duration: 0.4, bounce: 0.1), blendDuration: 0)) {
                     incomingProgress = 1
                 }
             }
@@ -410,6 +395,7 @@ struct MarqueeText: View {
 }
 
 struct ProgressBar: View {
+    let track: Track
     let fraction: Double
     let isSeeking: Bool
     let songToken: Int
@@ -418,17 +404,46 @@ struct ProgressBar: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.18))
-                Capsule().fill(.white.opacity(0.85))
-                    .frame(width: proxy.size.width * min(max(fraction, 0), 1))
-                    .animation(.spring(response: 0.3, dampingFraction: 1.0, blendDuration: 0), value: songToken)
-                    .animation(isSeeking ? .spring(response: 0.3, dampingFraction: 1.0, blendDuration: 0) : .linear(duration: 1),
-                               value: fraction)
+                Capsule().fill(.white.opacity(0.16))
+                ArtworkTile(track: track)
+                    .blur(radius: 6)
+                    .saturation(1.6)
+                    .brightness(0.15)
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .clipped()
+                    .mask(alignment: .leading) {
+                        Capsule()
+                            .frame(width: proxy.size.width * min(max(fraction, 0), 1))
+                            .animation(.spring(response: 0.3, dampingFraction: 1.0, blendDuration: 0), value: songToken)
+                            .animation(isSeeking ? .spring(response: 0.3, dampingFraction: 1.0, blendDuration: 0) : .linear(duration: 1),
+                                       value: fraction)
+                    }
             }
             .contentShape(Rectangle())
             .onTapGesture { location in onSeek(location.x / proxy.size.width) }
         }
-        .frame(height: 5)
+        .frame(height: 6)
+    }
+}
+
+struct VolumeSlider: View {
+    let level: Double
+    let onChange: (Double) -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule().fill(.white.opacity(0.16))
+                Capsule().fill(.white.opacity(0.55))
+                    .frame(width: proxy.size.width * min(max(level, 0), 1))
+                    .animation(.smooth(duration: 0.2), value: level)
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
+                onChange(drag.location.x / proxy.size.width)
+            })
+        }
+        .frame(height: 6)
     }
 }
 
@@ -436,6 +451,7 @@ struct MusicExpandedView: View {
     let player: MusicPlayer
     let width: CGFloat
     @State private var isSeeking = false
+    @State private var skips = (back: 0, forward: 0)
 
     var body: some View {
         if let track = player.track {
@@ -449,25 +465,26 @@ struct MusicExpandedView: View {
     private func playing(_ track: Track) -> some View {
         let art: CGFloat = 56
         let waveWidth: CGFloat = 4 * 2.5 * 1.75
+        let output = player.output
         return VStack(spacing: 0) {
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
                 ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: 12)
                     .frame(width: art, height: art)
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 1) {
                     ZStack(alignment: .leading) {
-                        MarqueeText(text: track.title, font: .system(size: 14.5, weight: .semibold),
-                                    width: width - art - waveWidth - 28)
-                            .id(player.songChangeToken)
-                            .transition(.blurReplace(.downUp))
-                    }
-                    .frame(height: 18)
-                    ZStack(alignment: .leading) {
-                        Text(track.artist).font(.system(size: 13.5, weight: .medium)).foregroundStyle(.white.opacity(0.55))
-                            .lineLimit(1)
+                        MarqueeText(text: track.title, font: .system(size: 13.5, weight: .semibold),
+                                    width: width - art - waveWidth - 30)
                             .id(player.songChangeToken)
                             .transition(.blurReplace(.downUp))
                     }
                     .frame(height: 17)
+                    ZStack(alignment: .leading) {
+                        Text(track.artist).font(.system(size: 13, weight: .regular)).foregroundStyle(.white.opacity(0.5))
+                            .lineLimit(1)
+                            .id(player.songChangeToken)
+                            .transition(.blurReplace(.downUp))
+                    }
+                    .frame(height: 16)
                 }
                 .animation(.spring(Spring(duration: 0.38, bounce: 0.25), blendDuration: 0), value: player.songChangeToken)
                 Spacer(minLength: 0)
@@ -475,9 +492,9 @@ struct MusicExpandedView: View {
             }
             .frame(height: art)
             .padding(.bottom, 13)
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 timeLabel(player.position)
-                ProgressBar(fraction: player.position / track.duration, isSeeking: isSeeking, songToken: player.songChangeToken) { fraction in
+                ProgressBar(track: track, fraction: player.position / track.duration, isSeeking: isSeeking, songToken: player.songChangeToken) { fraction in
                     isSeeking = true
                     player.seek(to: fraction)
                     Task { try? await Task.sleep(for: .seconds(0.35)); isSeeking = false }
@@ -487,16 +504,51 @@ struct MusicExpandedView: View {
             .frame(height: 12)
             .padding(.bottom, 20)
             HStack(spacing: 0) {
-                controlButton("shuffle", size: 18) { player.toggleShuffle() }
-                    .opacity(player.isShuffled ? 1 : 0.45)
-                controlButton("backward.fill", size: 22) { player.skip(forward: false) }
-                controlButton(player.isPlaying ? "pause.fill" : "play.fill", size: 26) { player.togglePlay() }
-                    .contentTransition(.symbolEffect(.replace))
-                controlButton("forward.fill", size: 22) { player.skip(forward: true) }
-                controlButton(player.repeatMode == 2 ? "repeat.1" : "repeat", size: 18) { player.cycleRepeat() }
-                    .opacity(player.repeatMode == 1 ? 0.45 : 1)
+                ControlButton(action: { player.toggleShuffle() }) { ShuffleGlyph(isOn: player.isShuffled) }
+                ControlButton(action: { skips.back += 1; player.skip(forward: false) }) {
+                    SkipGlyph(forward: false, trigger: skips.back)
+                }
+                ControlButton(action: { player.togglePlay() }) {
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 27, weight: .medium))
+                        .contentTransition(.symbolEffect(.replace.downUp.wholeSymbol))
+                        .animation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0), value: player.isPlaying)
+                }
+                ControlButton(action: { skips.forward += 1; player.skip(forward: true) }) {
+                    SkipGlyph(forward: true, trigger: skips.forward)
+                }
+                ControlButton(isActive: output.isShowingVolume, action: {
+                    withAnimation(.spring(Spring(duration: 0.4, bounce: 0.2), blendDuration: 0)) { output.isShowingVolume.toggle() }
+                }) {
+                    Image(systemName: output.symbol)
+                        .font(.system(size: 17, weight: .medium))
+                        .opacity(output.isShowingVolume ? 1 : 0.5)
+                        .contentTransition(.symbolEffect(.replace))
+                        .animation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0), value: output.symbol)
+                }
+                .disabled(!output.canSetVolume)
             }
             .frame(height: 30)
+            .padding(.horizontal, -10)
+            if output.isShowingVolume {
+                HStack(spacing: 10) {
+                    Button { output.toggleMute() } label: {
+                        Image(systemName: output.isMuted ? "speaker.slash.fill" : "speaker.fill")
+                            .contentTransition(.symbolEffect(.replace))
+                            .frame(width: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    VolumeSlider(level: output.isMuted ? 0 : output.volume) { output.setVolume($0) }
+                    Image(systemName: "speaker.wave.2.fill").frame(width: 20)
+                }
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.5))
+                .frame(height: 12)
+                .padding(.horizontal, 10)
+                .padding(.top, 20)
+                .transition(.blurReplace.combined(with: .offset(y: -8)))
+            }
         }
         .frame(width: width)
         .foregroundStyle(.white)
@@ -505,20 +557,79 @@ struct MusicExpandedView: View {
     private func timeLabel(_ seconds: Double, negative: Bool = false) -> some View {
         let s = Int(max(seconds, 0))
         return Text("\(negative ? "-" : "")\(s / 60):\(String(format: "%02d", s % 60))")
-            .font(.system(size: 10.5, weight: .semibold)).kerning(0.1)
+            .font(.system(size: 10.5, weight: .medium)).kerning(0.1)
             .monospacedDigit()
-            .foregroundStyle(.white.opacity(0.55))
-            .frame(width: 36, alignment: negative ? .trailing : .leading)
+            .foregroundStyle(.white.opacity(0.5))
+            .frame(width: 32, alignment: negative ? .trailing : .leading)
     }
+}
 
-    private func controlButton(_ symbol: String, size: CGFloat, action: @escaping () -> Void) -> some View {
+private struct ControlButton<Label: View>: View {
+    var isActive = false
+    let action: () -> Void
+    @ViewBuilder let label: Label
+    @State private var isHovered = false
+
+    var body: some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: size, weight: .medium))
-                .frame(width: 30, height: 30)
-                .frame(maxWidth: .infinity)
+            label
+                .frame(width: 46, height: 42)
+                .background(RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(.white.opacity(isActive ? 0.13 : isHovered ? 0.09 : 0)))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressSquash())
+        .onHover { inside in withAnimation(.easeOut(duration: 0.15)) { isHovered = inside } }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct ShuffleGlyph: View {
+    let isOn: Bool
+
+    var body: some View {
+        ZStack {
+            Image(systemName: "shuffle").font(.system(size: 17, weight: .medium))
+                .offset(y: isOn ? -3 : 0)
+            Circle().frame(width: 3.5, height: 3.5)
+                .scaleEffect(isOn ? 1 : 0.2)
+                .opacity(isOn ? 1 : 0)
+                .offset(y: 9)
+        }
+        .opacity(0.5)
+        .animation(.spring(Spring(duration: 0.3, bounce: 0.3), blendDuration: 0), value: isOn)
+    }
+}
+
+private struct SkipGlyph: View {
+    let forward: Bool
+    let trigger: Int
+
+    var body: some View {
+        let w: CGFloat = 12.5
+        KeyframeAnimator(initialValue: 0.0, trigger: trigger) { p in
+            ZStack {
+                triangle.offset(x: w / 2).scaleEffect(max(0, 1 - 2 * p), anchor: .trailing).opacity(max(0, 1 - 2 * p))
+                triangle.offset(x: -w / 2 + w * min(1, 2 * p))
+                triangle.offset(x: -w / 2).scaleEffect(min(1, max(0, (p - 0.25) / 0.75)))
+                    .opacity(min(1, max(0, (p - 0.25) / 0.5)))
+            }
+            .scaleEffect(x: forward ? 1 : -1)
+        } keyframes: { _ in
+            CubicKeyframe(1, duration: 0.38)
+        }
+    }
+
+    private var triangle: some View {
+        Image(systemName: "play.fill").font(.system(size: 15, weight: .medium))
+    }
+}
+
+private struct PressSquash: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.92 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
 
@@ -531,8 +642,6 @@ struct MusicClosedView: View {
         let shown = player.track ?? lastTrack
         HStack(spacing: 0) {
             if let track = shown {
-                // 5 pt from the notch edge and, lifted 1 pt, 5 pt from the bottom too (the top gap hides in
-                // the bezel anyway); the radius follows the notch's bottom corner at that inset
                 ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: 7)
                     .frame(width: 24, height: 24)
                     .offset(y: -1)

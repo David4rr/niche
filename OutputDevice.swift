@@ -1,0 +1,116 @@
+import AudioToolbox
+import CoreAudio
+import Foundation
+
+@MainActor
+@Observable
+final class OutputDevice {
+    private(set) var symbol = "laptopcomputer"
+    private(set) var volume: Double = 0
+    private(set) var isMuted = false
+    private(set) var canSetVolume = false
+    var isShowingVolume = false
+
+    @ObservationIgnored private var device = AudioObjectID(kAudioObjectUnknown)
+    @ObservationIgnored private var listeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
+
+    func start() {
+        var address = Self.address(kAudioHardwarePropertyDefaultOutputDevice, scope: kAudioObjectPropertyScopeGlobal)
+        let changed: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            Task { @MainActor in self?.follow() }
+        }
+        AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, .main, changed)
+        follow()
+    }
+
+    func setVolume(_ level: Double) {
+        guard canSetVolume else { return }
+        var value = Float32(min(max(level, 0), 1))
+        var address = Self.address(kAudioHardwareServiceDeviceProperty_VirtualMainVolume)
+        AudioObjectSetPropertyData(device, &address, 0, nil, UInt32(MemoryLayout<Float32>.size), &value)
+        if isMuted && value > 0 { toggleMute() }
+        volume = Double(value)
+    }
+
+    func toggleMute() {
+        var address = Self.address(kAudioDevicePropertyMute)
+        guard AudioObjectHasProperty(device, &address) else { return }
+        var muted = UInt32(isMuted ? 0 : 1)
+        AudioObjectSetPropertyData(device, &address, 0, nil, UInt32(MemoryLayout<UInt32>.size), &muted)
+        isMuted = muted != 0
+    }
+
+    private func follow() {
+        for (object, address, block) in listeners {
+            var address = address
+            AudioObjectRemovePropertyListenerBlock(object, &address, .main, block)
+        }
+        listeners = []
+        var address = Self.address(kAudioHardwarePropertyDefaultOutputDevice, scope: kAudioObjectPropertyScopeGlobal)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device) == noErr else {
+            NSLog("Niche cannot read the default output device")
+            return
+        }
+        for selector in [kAudioHardwareServiceDeviceProperty_VirtualMainVolume, kAudioDevicePropertyMute, kAudioDevicePropertyDataSource] {
+            var address = Self.address(selector)
+            guard AudioObjectHasProperty(device, &address) else { continue }
+            let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+                Task { @MainActor in self?.read() }
+            }
+            AudioObjectAddPropertyListenerBlock(device, &address, .main, block)
+            listeners.append((device, address, block))
+        }
+        read()
+    }
+
+    private func read() {
+        var address = Self.address(kAudioHardwareServiceDeviceProperty_VirtualMainVolume)
+        var settable = DarwinBoolean(false)
+        canSetVolume = AudioObjectHasProperty(device, &address)
+            && AudioObjectIsPropertySettable(device, &address, &settable) == noErr && settable.boolValue
+        var level = Float32(0)
+        var size = UInt32(MemoryLayout<Float32>.size)
+        if AudioObjectGetPropertyData(device, &address, 0, nil, &size, &level) == noErr { volume = Double(level) }
+        address = Self.address(kAudioDevicePropertyMute)
+        var muted = UInt32(0)
+        size = UInt32(MemoryLayout<UInt32>.size)
+        if AudioObjectHasProperty(device, &address) { AudioObjectGetPropertyData(device, &address, 0, nil, &size, &muted) }
+        isMuted = muted != 0
+        symbol = deviceSymbol()
+    }
+
+    private func deviceSymbol() -> String {
+        var transport = UInt32(0)
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        var address = Self.address(kAudioDevicePropertyTransportType, scope: kAudioObjectPropertyScopeGlobal)
+        AudioObjectGetPropertyData(device, &address, 0, nil, &size, &transport)
+        var name: Unmanaged<CFString>?
+        size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        address = Self.address(kAudioObjectPropertyName, scope: kAudioObjectPropertyScopeGlobal)
+        AudioObjectGetPropertyData(device, &address, 0, nil, &size, &name)
+        let label = (name?.takeRetainedValue() as String?)?.lowercased() ?? ""
+
+        switch transport {
+        case kAudioDeviceTransportTypeBuiltIn:
+            var source = UInt32(0)
+            size = UInt32(MemoryLayout<UInt32>.size)
+            address = Self.address(kAudioDevicePropertyDataSource)
+            AudioObjectGetPropertyData(device, &address, 0, nil, &size, &source)
+            return source == 0x6864_706E ? "headphones" : "laptopcomputer"
+        case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE:
+            return label.contains("speaker") ? "hifispeaker.fill" : HeadphonesWatcher.symbol(for: label)
+        case kAudioDeviceTransportTypeAirPlay:
+            return label.contains("homepod") ? "homepod.fill" : "airplay.audio"
+        case kAudioDeviceTransportTypeHDMI, kAudioDeviceTransportTypeDisplayPort:
+            return "display"
+        default:
+            return "hifispeaker.fill"
+        }
+    }
+
+    private static func address(_ selector: AudioObjectPropertySelector,
+                                scope: AudioObjectPropertyScope = kAudioDevicePropertyScopeOutput) -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+    }
+}

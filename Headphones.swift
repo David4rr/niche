@@ -1,0 +1,254 @@
+import AppKit
+@preconcurrency import IOBluetooth
+import SwiftUI
+
+enum ListeningMode: Int {
+    case off = 1, noiseCancellation, transparency, adaptive
+
+    var symbol: String {
+        switch self {
+        case .off: "person.crop.circle"
+        case .noiseCancellation: "person.crop.circle.fill"
+        case .transparency: "person.wave.2.fill"
+        case .adaptive: "sparkles"
+        }
+    }
+
+    var tint: Color {
+        self == .off ? .white.opacity(0.5) : Color(red: 0.55, green: 0.76, blue: 1)
+    }
+}
+
+@MainActor
+final class HeadphonesWatcher: NSObject {
+    var onConnect: ((String, Double?) -> Void)?
+    var onDisconnect: ((String) -> Void)?
+    var onMode: ((String, ListeningMode) -> Void)?
+    var onLowBattery: ((String, Double) -> Void)?
+
+    private var connectNote: IOBluetoothUserNotification?
+    private var disconnectNotes: [String: IOBluetoothUserNotification] = [:]
+    private var devices: [String: IOBluetoothDevice] = [:]
+    private var batteries: [String: Double] = [:]
+    private var modes: [String: ListeningMode] = [:]
+    private var modeObserver: NSObjectProtocol?
+    private var batteryTimer: Timer?
+    private var startedAt = Date.distantPast
+
+    static func symbol(for name: String) -> String {
+        let name = name.lowercased()
+        if name.contains("airpods max") { return "airpods.max" }
+        if name.contains("airpods pro") { return "airpods.pro" }
+        if name.contains("airpods") { return "airpods" }
+        if name.contains("beats") { return "beats.headphones" }
+        return "headphones"
+    }
+
+    func start() {
+        startedAt = Date()
+        connectNote = IOBluetoothDevice.register(forConnectNotifications: self, selector: #selector(connected(_:device:)))
+        modeObserver = NotificationCenter.default.addObserver(forName: Notification.Name("IOBluetoothDeviceListeningModeChanged"),
+                                                              object: nil, queue: .main) { [weak self] note in
+            guard let device = note.object as? IOBluetoothDevice else { return }
+            MainActor.assumeIsolated { self?.modeChanged(device) }
+        }
+        batteryTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkBatteries() }
+        }
+    }
+
+    func stop() {
+        connectNote?.unregister()
+        connectNote = nil
+        disconnectNotes.values.forEach { $0.unregister() }
+        disconnectNotes = [:]
+        devices = [:]
+        batteries = [:]
+        modes = [:]
+        if let modeObserver { NotificationCenter.default.removeObserver(modeObserver) }
+        modeObserver = nil
+        batteryTimer?.invalidate()
+        batteryTimer = nil
+    }
+
+    @objc nonisolated private func connected(_ note: IOBluetoothUserNotification, device: IOBluetoothDevice) {
+        DispatchQueue.main.async { [weak self] in MainActor.assumeIsolated { self?.track(device) } }
+    }
+
+    @objc nonisolated private func disconnected(_ note: IOBluetoothUserNotification, device: IOBluetoothDevice) {
+        DispatchQueue.main.async { [weak self] in MainActor.assumeIsolated { self?.forget(device) } }
+    }
+
+    private func track(_ device: IOBluetoothDevice) {
+        guard device.deviceClassMajor == kBluetoothDeviceClassMajorAudio, let address = device.addressString,
+              devices[address] == nil else { return }
+        devices[address] = device
+        disconnectNotes[address] = device.register(forDisconnectNotification: self, selector: #selector(disconnected(_:device:)))
+        let isLaunch = Date().timeIntervalSince(startedAt) < 2
+        Task {
+            var level = Self.battery(of: device)
+            for _ in 0..<6 where level == nil {
+                try? await Task.sleep(for: .seconds(0.5))
+                level = Self.battery(of: device)
+            }
+            guard devices[address] != nil else { return }
+            batteries[address] = level
+            if !isLaunch { onConnect?(device.name ?? "", level) }
+        }
+    }
+
+    private func forget(_ device: IOBluetoothDevice) {
+        guard let address = device.addressString, devices.removeValue(forKey: address) != nil else { return }
+        disconnectNotes.removeValue(forKey: address)?.unregister()
+        batteries[address] = nil
+        modes[address] = nil
+        onDisconnect?(device.name ?? "")
+    }
+
+    private func modeChanged(_ device: IOBluetoothDevice) {
+        guard let address = device.addressString, devices[address] != nil,
+              let mode = ListeningMode(rawValue: Self.read(device, "listeningMode")), modes[address] != mode else { return }
+        modes[address] = mode
+        onMode?(device.name ?? "", mode)
+    }
+
+    private func checkBatteries() {
+        for (address, device) in devices {
+            guard let level = Self.battery(of: device) else { continue }
+            let last = batteries[address] ?? 1
+            batteries[address] = level
+            if (last > 0.2 && level <= 0.2) || (last > 0.1 && level <= 0.1) { onLowBattery?(device.name ?? "", level) }
+        }
+    }
+
+    private static func battery(of device: IOBluetoothDevice) -> Double? {
+        let buds = [read(device, "batteryPercentLeft"), read(device, "batteryPercentRight")].filter { $0 > 0 }
+        if let low = buds.min() { return Double(low) / 100 }
+        let single = read(device, "batteryPercentSingle")
+        return single > 0 ? Double(single) / 100 : nil
+    }
+
+    private static func read(_ device: IOBluetoothDevice, _ name: String) -> Int {
+        let selector = NSSelectorFromString(name)
+        guard device.responds(to: selector), let method = device.method(for: selector) else { return 0 }
+        return Int(unsafeBitCast(method, to: (@convention(c) (AnyObject, Selector) -> UInt8).self)(device, selector))
+    }
+}
+
+struct HeadphonesGlyph: View {
+    let symbol: String
+    let isConnected: Bool
+    @State private var plays = 0
+    @State private var slash = 0.0
+
+    private struct Pose {
+        var scale = 1.0
+        var y = 0.0
+        var tilt = 0.0
+        var blur = 0.0
+    }
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 16, weight: .semibold))
+            .keyframeAnimator(initialValue: Pose(), trigger: plays) { content, pose in
+                content
+                    .scaleEffect(pose.scale)
+                    .rotationEffect(.degrees(pose.tilt))
+                    .offset(y: pose.y)
+                    .blur(radius: pose.blur)
+            } keyframes: { _ in
+                KeyframeTrack(\.scale) {
+                    MoveKeyframe(isConnected ? 0.55 : 1)
+                    SpringKeyframe(isConnected ? 1.12 : 0.8, duration: 0.22, spring: Spring(duration: 0.22, bounce: 0))
+                    SpringKeyframe(isConnected ? 1 : 0.86, duration: 0.4, spring: Spring(duration: 0.4, bounce: 0.32))
+                }
+                KeyframeTrack(\.y) {
+                    MoveKeyframe(isConnected ? -5 : 0)
+                    SpringKeyframe(isConnected ? 0 : 2.5, duration: 0.5, spring: Spring(duration: 0.5, bounce: 0.32))
+                }
+                KeyframeTrack(\.tilt) {
+                    MoveKeyframe(isConnected ? -14 : 0)
+                    SpringKeyframe(isConnected ? 6 : 10, duration: 0.2, spring: Spring(duration: 0.2, bounce: 0))
+                    SpringKeyframe(isConnected ? 0 : 8, duration: 0.4, spring: Spring(duration: 0.4, bounce: 0.3))
+                }
+                KeyframeTrack(\.blur) {
+                    MoveKeyframe(isConnected ? 4 : 0)
+                    CubicKeyframe(0, duration: 0.25)
+                }
+            }
+            .foregroundStyle(.white.opacity(isConnected ? 1 : 0.45))
+            .animation(.easeOut(duration: 0.3).delay(0.12), value: isConnected)
+            .frame(width: 22, height: 18)
+            .overlay {
+                SlashLine().trim(from: 0, to: slash).stroke(.black, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                SlashLine().trim(from: 0, to: slash).stroke(.white, style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+            }
+            .onAppear { play() }
+            .onChange(of: isConnected) { play() }
+    }
+
+    private func play() {
+        plays += 1
+        slash = 0
+        guard !isConnected else { return }
+        withAnimation(.spring(Spring(duration: 0.35, bounce: 0), blendDuration: 0).delay(0.2)) { slash = 1 }
+    }
+}
+
+private struct SlashLine: Shape {
+    func path(in rect: CGRect) -> Path {
+        Path { p in
+            p.move(to: CGPoint(x: rect.minX + 5, y: rect.minY + 2.5))
+            p.addLine(to: CGPoint(x: rect.maxX - 5, y: rect.maxY - 2.5))
+        }
+    }
+}
+
+struct BatteryRing: View {
+    let level: Double
+    let isLow: Bool
+    @State private var shown = 0.0
+
+    var body: some View {
+        let tint: Color = level <= 0.1 ? .red : level <= 0.2 ? .orange : .green
+        HStack(spacing: 3) {
+            ZStack {
+                Circle().stroke(.white.opacity(0.2), lineWidth: 2.2)
+                Circle().trim(from: 0, to: shown)
+                    .stroke(tint, style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: 10, height: 10)
+            .phaseAnimator(isLow ? [1.0, 0.35] : [1.0]) { ring, opacity in
+                ring.opacity(opacity)
+            } animation: { _ in .easeInOut(duration: 0.7) }
+            Text("\(Int((level * 100).rounded()))%")
+                .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+                .foregroundStyle(isLow ? tint : .white.opacity(0.85))
+                .contentTransition(.numericText(value: level))
+        }
+        .onAppear {
+            withAnimation(.spring(Spring(duration: 0.6, bounce: 0.1), blendDuration: 0).delay(0.15)) { shown = level }
+        }
+        .onChange(of: level) { withAnimation(.smooth(duration: 0.25)) { shown = level } }
+    }
+}
+
+struct ListeningModeGlyph: View {
+    let mode: ListeningMode
+    @State private var bounces = 0
+
+    var body: some View {
+        Image(systemName: mode.symbol)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(mode.tint)
+            .contentTransition(.symbolEffect(.replace.downUp.wholeSymbol))
+            .symbolEffect(.variableColor.iterative.reversing, isActive: mode == .transparency || mode == .adaptive)
+            .symbolEffect(.bounce, value: bounces)
+            .animation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0), value: mode)
+            .frame(width: 18, height: 16)
+            .onAppear { bounces += 1 }
+            .onChange(of: mode) { bounces += 1 }
+    }
+}

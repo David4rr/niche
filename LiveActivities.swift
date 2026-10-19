@@ -8,7 +8,7 @@ import SwiftUI
 @Observable
 final class LiveActivityCenter {
     enum Kind: String, CaseIterable, Identifiable {
-        case capsLock, focus, volume, brightness, lowBattery, charging, fullyCharged, agentDone, copied
+        case capsLock, focus, volume, brightness, lowBattery, charging, fullyCharged, headphones, noiseControl, headphonesBattery, agentDone, copied
         var id: Self { self }
         var title: String {
             switch self {
@@ -19,6 +19,9 @@ final class LiveActivityCenter {
             case .lowBattery: "Low battery"
             case .charging: "Charging"
             case .fullyCharged: "Fully charged"
+            case .headphones: "AirPods connected"
+            case .noiseControl: "Noise control"
+            case .headphonesBattery: "AirPods low battery"
             case .agentDone: "Agent finished"
             case .copied: "Copied to clipboard"
             }
@@ -34,6 +37,7 @@ final class LiveActivityCenter {
         var icon: NSImage?
         var image: NSImage?
         var color: Color?
+        var mode: ListeningMode?
     }
 
     private(set) var current: Activity?
@@ -53,7 +57,7 @@ final class LiveActivityCenter {
     @ObservationIgnored private var lastCaps: Bool?
     @ObservationIgnored private var brightnessRegistered = false
     @ObservationIgnored private var lastBrightness: Double?
-    @ObservationIgnored private var powerChangedAt = Date.distantPast
+    @ObservationIgnored private var brightnessKeyAt = Date.distantPast
     @ObservationIgnored private var focusProcess: Process?
     @ObservationIgnored private var lastFocus: Bool?
     @ObservationIgnored private var focusSymbol = "moon.fill"
@@ -61,12 +65,14 @@ final class LiveActivityCenter {
     @ObservationIgnored private var lastBattery: (level: Int, onAC: Bool, full: Bool)?
     @ObservationIgnored private var volumeDevice = AudioObjectID(kAudioObjectUnknown)
     @ObservationIgnored private var lastVolume: (Float, Bool)?
+    @ObservationIgnored var showsVolume: () -> Bool = { true }
     @ObservationIgnored private var audioListeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
     @ObservationIgnored private let registerBrightness: @convention(c) (UInt32, UnsafeRawPointer?, CFNotificationCallback) -> Int32
     @ObservationIgnored private let unregisterBrightness: @convention(c) (UInt32, UnsafeRawPointer?) -> Int32
     @ObservationIgnored private let smoothBrightness: @convention(c) (UInt32, Float) -> Int32
     @ObservationIgnored private var keyTap: CFMachPort?
     @ObservationIgnored private var keyTapSource: CFRunLoopSource?
+    @ObservationIgnored private var headphones: HeadphonesWatcher?
 
     nonisolated(unsafe) private static weak var shared: LiveActivityCenter?
     private static let lowBatteryThreshold = 20
@@ -86,7 +92,6 @@ final class LiveActivityCenter {
         }
         registerBrightness = unsafeBitCast(register, to: (@convention(c) (UInt32, UnsafeRawPointer?, CFNotificationCallback) -> Int32).self)
         unregisterBrightness = unsafeBitCast(unregister, to: (@convention(c) (UInt32, UnsafeRawPointer?) -> Int32).self)
-        // takes a change, not a target: (display, delta) adds delta to the current level
         smoothBrightness = unsafeBitCast(smooth, to: (@convention(c) (UInt32, Float) -> Int32).self)
         Self.shared = self
     }
@@ -161,7 +166,7 @@ final class LiveActivityCenter {
         isKeyTapActive = false
         if let current, !watching(current.kind) { hide() }
 
-        if replacesSystemHUD && (watching(.volume) || watching(.brightness)) { startKeyTap() }
+        if needsKeyTap { startKeyTap() }
 
         if watching(.capsLock) {
             readCaps()
@@ -180,15 +185,45 @@ final class LiveActivityCenter {
         if watching(.focus) { watchFocus() }
         if watching(.lowBattery) || watching(.charging) || watching(.fullyCharged) || watching(.brightness) { watchBattery() }
         if watching(.volume) { watchVolume() }
+        if !(watching(.headphones) || watching(.noiseControl) || watching(.headphonesBattery)) {
+            headphones?.stop()
+            headphones = nil
+        } else if headphones == nil {
+            watchHeadphones()
+        }
+    }
+
+    private func watchHeadphones() {
+        let watcher = HeadphonesWatcher()
+        watcher.onConnect = { [weak self] name, level in
+            guard let self, self.watching(.headphones) else { return }
+            self.show(Activity(kind: .headphones, level: level ?? 0, isOn: true, symbol: HeadphonesWatcher.symbol(for: name)), for: 2.5)
+        }
+        watcher.onDisconnect = { [weak self] name in
+            guard let self, self.watching(.headphones) else { return }
+            self.show(Activity(kind: .headphones, isOn: false, symbol: HeadphonesWatcher.symbol(for: name)), for: 2)
+        }
+        watcher.onMode = { [weak self] name, mode in
+            guard let self, self.watching(.noiseControl) else { return }
+            self.show(Activity(kind: .noiseControl, symbol: HeadphonesWatcher.symbol(for: name), mode: mode), for: 1.8)
+        }
+        watcher.onLowBattery = { [weak self] name, level in
+            guard let self, self.watching(.headphonesBattery) else { return }
+            self.show(Activity(kind: .headphonesBattery, level: level, symbol: HeadphonesWatcher.symbol(for: name)), for: 3)
+        }
+        watcher.start()
+        headphones = watcher
     }
 
     private enum MediaKey { case volumeUp, volumeDown, mute, brightnessUp, brightnessDown }
+
+    private var needsKeyTap: Bool { watching(.brightness) || (replacesSystemHUD && watching(.volume)) }
 
     private func startKeyTap() {
         guard AXIsProcessTrusted() else {
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(3))
-                guard let self, self.keyTap == nil, self.replacesSystemHUD else { return }
+                guard let self, self.keyTap == nil, self.needsKeyTap else { return }
                 self.startKeyTap()
             }
             return
@@ -243,10 +278,9 @@ final class LiveActivityCenter {
         guard watching(isVolume ? .volume : .brightness) else { return false }
         let fine = event.flags.contains(.maskShift) && event.flags.contains(.maskAlternate)
         let step: Float = fine ? 1.0 / 64 : 1.0 / 16
+        if !isVolume && isDown { brightnessKeyAt = Date() }
+        guard replacesSystemHUD else { return false }
         guard isDown else { return true }
-        // brightness goes through the same smooth, relative change the brightness keys use, so it fades
-        // and becomes macOS's own level. setting the panel directly (DisplayServicesSetBrightness) jumps,
-        // and macOS fades it back to its old level afterwards, which once left the screen stuck dark
         if !isVolume { return smoothBrightness(CGMainDisplayID(), key == .brightnessUp ? step : -step) == 0 }
         return changeVolume(key, step: step)
     }
@@ -291,8 +325,8 @@ final class LiveActivityCenter {
     }
 
     private func brightnessChanged(_ level: Double) {
-        let systemRamp = Date().timeIntervalSince(powerChangedAt) < 3
-        if !systemRamp && lastBrightness.map({ abs($0 - level) > 0.001 }) != false {
+        let byKey = Date().timeIntervalSince(brightnessKeyAt) < 1.5
+        if byKey && lastBrightness.map({ abs($0 - level) > 0.001 }) != false {
             show(Activity(kind: .brightness, level: level), for: 1.4)
         }
         lastBrightness = level
@@ -376,7 +410,6 @@ final class LiveActivityCenter {
         let full = onAC && (level >= 100 || battery[kIOPSIsChargedKey] as? Bool == true)
         let now = (level: level, onAC: onAC, full: full)
         if let last = lastBattery {
-            if onAC != last.onAC { powerChangedAt = Date() }
             let fraction = Double(level) / 100
             if full && !last.full && watching(.fullyCharged) {
                 show(Activity(kind: .fullyCharged, level: fraction), for: 2.5)
@@ -432,7 +465,7 @@ final class LiveActivityCenter {
             AudioObjectGetPropertyData(volumeDevice, &address, 0, nil, &size, &muted)
         }
         let now = (level, muted != 0)
-        if let lastVolume, lastVolume != now {
+        if let lastVolume, lastVolume != now, showsVolume() {
             show(Activity(kind: .volume, level: Double(level), isOn: muted == 0), for: 1.4)
         }
         lastVolume = now
@@ -467,23 +500,26 @@ final class LiveActivityCenter {
 struct LiveActivityView: View {
     let activity: LiveActivityCenter.Activity
 
-    // the bar is wider than the slot, so the notch grows this much on the right while it shows
-    static let levelRoom: CGFloat = 12
+    static func room(for activity: LiveActivityCenter.Activity) -> CGFloat {
+        switch activity.kind {
+        case .volume, .brightness, .lowBattery, .charging, .fullyCharged: 12
+        case .headphonesBattery: 16
+        case .headphones: activity.isOn && activity.level > 0 ? 16 : 0
+        default: 0
+        }
+    }
 
     var body: some View {
-        let isLevel = activity.kind == .volume || activity.kind == .brightness
+        let room = Self.room(for: activity)
         HStack(spacing: 0) {
             icon
                 .frame(width: MusicClosedView.slot)
             Spacer(minLength: 0)
-            // the icon sits 11 pt from the left edge (16 pt glyph centred in the 38 pt slot); the bar keeps
-            // the same 11 pt from the right edge
             trailing
-                .padding(.trailing, isLevel ? 11 : 0)
-                .frame(width: MusicClosedView.slot + (isLevel ? Self.levelRoom : 0), alignment: isLevel ? .trailing : .center)
+                .padding(.trailing, room == 0 ? 0 : [.lowBattery, .charging, .fullyCharged].contains(activity.kind) ? 9 : 11)
+                .frame(width: MusicClosedView.slot + room, alignment: room > 0 ? .trailing : .center)
         }
         .foregroundStyle(.white)
-        // the notch's black runs on into the bezel above it, so small glyphs that are centred look low
         .offset(y: -2)
     }
 
@@ -503,6 +539,8 @@ struct LiveActivityView: View {
             symbol("battery.100percent.bolt", tint: .green)
         case .fullyCharged:
             symbol("battery.100percent", tint: .green)
+        case .headphones, .noiseControl, .headphonesBattery:
+            HeadphonesGlyph(symbol: activity.symbol ?? "airpods", isConnected: activity.kind != .headphones || activity.isOn)
         case .agentDone:
             if let agent = activity.agent { AgentGlyph(kind: agent, size: 13) }
         case .copied:
@@ -523,6 +561,20 @@ struct LiveActivityView: View {
         case .lowBattery, .charging, .fullyCharged:
             label("\(Int((activity.level * 100).rounded()))%")
                 .foregroundStyle(activity.kind == .lowBattery ? Color.red : .white.opacity(0.85))
+        case .headphones:
+            if !activity.isOn {
+                Text("Off")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.5))
+            } else if activity.level > 0 {
+                BatteryRing(level: activity.level, isLow: false)
+            } else {
+                symbol("checkmark.circle.fill", tint: .green)
+            }
+        case .headphonesBattery:
+            BatteryRing(level: activity.level, isLow: true)
+        case .noiseControl:
+            if let mode = activity.mode { ListeningModeGlyph(mode: mode) }
         case .agentDone:
             symbol("checkmark.circle.fill", tint: .green)
         case .copied:
