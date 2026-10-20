@@ -1,5 +1,9 @@
 # changelog
 
+## 0.6.7.1
+
+- the island or notch setting only shows on macs without a notch.
+
 ## 0.6.7
 
 - macs without a notch, like the m1 macbook air, get one. pick island, a pill floating just below the top of the screen, or notch, a small one at the menu bar's height. it's in settings, general.

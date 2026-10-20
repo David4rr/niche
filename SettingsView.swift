@@ -80,16 +80,16 @@ struct SettingsView: View {
             } footer: {
                 Text("Right-click the notch to open these settings when the menu bar icon is hidden.")
             }
-            Section {
-                Picker("Without a notch", selection: $lab.notchStyle) {
-                    Text("Island").tag(LabState.NotchStyle.island)
-                    Text("Notch").tag(LabState.NotchStyle.notch)
+            if !LabState.hasNotch {
+                Section {
+                    Picker("Notch style", selection: $lab.notchStyle) {
+                        Text("Island").tag(LabState.NotchStyle.island)
+                        Text("Notch").tag(LabState.NotchStyle.notch)
+                    }
+                    .pickerStyle(.segmented)
+                } footer: {
+                    Text("Island floats just below the top of the screen. Notch sits in the menu bar at its height.")
                 }
-                .pickerStyle(.segmented)
-            } footer: {
-                Text(LabState.hasNotch
-                     ? "Used on Macs without a notch, like the M1 MacBook Air. This display has one, so it keeps the real notch."
-                     : "Island floats just below the top of the screen. Notch sits in the menu bar at its height.")
             }
             Section {
                 LabeledContent("Notch image") {
