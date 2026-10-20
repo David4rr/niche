@@ -1,5 +1,10 @@
 # changelog
 
+## 0.6.6
+
+- volume and brightness keys no longer freeze the keyboard or bring back the macOS popup. niche kept piling up volume listeners every time the output device or a live activity setting changed, so after a while one key press ran hundreds of volume reads at once. they now come off properly, and the volume and brightness changes themselves run in the background.
+- memory: about 18 mb after launch (19 mb in 0.6.5). the download stays 2.4 mb.
+
 ## 0.6.5
 
 - the noise control activity works: niche follows the same change that makes macOS show its own noise control banner, so switching modes from control center or the stem now shows in the notch. taking a bud out (which also switches the mode) doesn't.

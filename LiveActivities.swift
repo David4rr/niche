@@ -64,9 +64,12 @@ final class LiveActivityCenter {
     @ObservationIgnored private var batterySource: CFRunLoopSource?
     @ObservationIgnored private var lastBattery: (level: Int, onAC: Bool, full: Bool)?
     @ObservationIgnored private var volumeDevice = AudioObjectID(kAudioObjectUnknown)
+    @ObservationIgnored private var volumeSettable = false
+    @ObservationIgnored private var volumeMutable = false
+    @ObservationIgnored private let mediaQueue = DispatchQueue(label: "niche.mediakeys")
     @ObservationIgnored private var lastVolume: (Float, Bool)?
     @ObservationIgnored var showsVolume: () -> Bool = { true }
-    @ObservationIgnored private var audioListeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
+    @ObservationIgnored private var audioListeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerProc)] = []
     @ObservationIgnored private let registerBrightness: @convention(c) (UInt32, UnsafeRawPointer?, CFNotificationCallback) -> Int32
     @ObservationIgnored private let unregisterBrightness: @convention(c) (UInt32, UnsafeRawPointer?) -> Int32
     @ObservationIgnored private let smoothBrightness: @convention(c) (UInt32, Float) -> Int32
@@ -145,9 +148,9 @@ final class LiveActivityCenter {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), batterySource, .defaultMode)
             self.batterySource = nil
         }
-        for (object, address, block) in audioListeners {
+        for (object, address, proc) in audioListeners {
             var address = address
-            AudioObjectRemovePropertyListenerBlock(object, &address, .main, block)
+            AudioObjectRemovePropertyListener(object, &address, proc, nil)
         }
         audioListeners = []
         lastCaps = nil
@@ -282,41 +285,46 @@ final class LiveActivityCenter {
         if !isVolume && isDown { brightnessKeyAt = Date() }
         guard replacesSystemHUD else { return false }
         guard isDown else { return true }
-        if !isVolume { return smoothBrightness(CGMainDisplayID(), key == .brightnessUp ? step : -step) == 0 }
-        return changeVolume(key, step: step)
+        if !isVolume {
+            guard brightnessRegistered else { return false }
+            let smooth = smoothBrightness
+            let delta = key == .brightnessUp ? step : -step
+            mediaQueue.async {
+                if smooth(CGMainDisplayID(), delta) != 0 { NSLog("Niche could not change the brightness") }
+            }
+            return true
+        }
+        guard key == .mute ? volumeMutable : volumeSettable else { return false }
+        let device = volumeDevice
+        mediaQueue.async { Self.changeVolume(key, step: step, on: device) }
+        return true
     }
 
-    private func changeVolume(_ key: MediaKey, step: Float) -> Bool {
-        var device = AudioObjectID(kAudioObjectUnknown)
-        var size = UInt32(MemoryLayout<AudioObjectID>.size)
-        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-                                                 mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device) == noErr else { return false }
+    nonisolated private static func changeVolume(_ key: MediaKey, step: Float, on device: AudioObjectID) {
         var volume = AudioObjectPropertyAddress(mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
                                                 mScope: kAudioDevicePropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
         var mute = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyMute,
                                               mScope: kAudioDevicePropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
-        var settable = DarwinBoolean(false)
-        guard AudioObjectHasProperty(device, &volume), AudioObjectIsPropertySettable(device, &volume, &settable) == noErr,
-              settable.boolValue else { return false }
-        let hasMute = AudioObjectHasProperty(device, &mute)
         var muted = UInt32(0)
-        size = UInt32(MemoryLayout<UInt32>.size)
-        if hasMute { AudioObjectGetPropertyData(device, &mute, 0, nil, &size, &muted) }
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        let hasMute = AudioObjectGetPropertyData(device, &mute, 0, nil, &size, &muted) == noErr
         if key == .mute {
-            guard hasMute else { return false }
             muted = muted == 0 ? 1 : 0
-            return AudioObjectSetPropertyData(device, &mute, 0, nil, size, &muted) == noErr
+            AudioObjectSetPropertyData(device, &mute, 0, nil, size, &muted)
+            return
         }
         var level = Float32(0)
         size = UInt32(MemoryLayout<Float32>.size)
-        guard AudioObjectGetPropertyData(device, &volume, 0, nil, &size, &level) == noErr else { return false }
+        guard AudioObjectGetPropertyData(device, &volume, 0, nil, &size, &level) == noErr else {
+            NSLog("Niche could not read the output volume")
+            return
+        }
         level = min(max(((level + (key == .volumeUp ? step : -step)) / step).rounded() * step, 0), 1)
         if hasMute && muted != 0 && key == .volumeUp {
             muted = 0
             AudioObjectSetPropertyData(device, &mute, 0, nil, UInt32(MemoryLayout<UInt32>.size), &muted)
         }
-        return AudioObjectSetPropertyData(device, &volume, 0, nil, size, &level) == noErr
+        AudioObjectSetPropertyData(device, &volume, 0, nil, size, &level)
     }
 
     private func readCaps() {
@@ -429,26 +437,38 @@ final class LiveActivityCenter {
         var defaultOutput = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice,
                                                        mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         let system = AudioObjectID(kAudioObjectSystemObject)
-        let deviceChanged: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            Task { @MainActor in self?.restart() }
+        let deviceChanged: AudioObjectPropertyListenerProc = { _, _, _, _ in
+            Task { @MainActor in LiveActivityCenter.shared?.restart() }
+            return noErr
         }
-        AudioObjectAddPropertyListenerBlock(system, &defaultOutput, .main, deviceChanged)
+        AudioObjectAddPropertyListener(system, &defaultOutput, deviceChanged, nil)
         audioListeners.append((system, defaultOutput, deviceChanged))
 
+        volumeSettable = false
+        volumeMutable = false
         var size = UInt32(MemoryLayout<AudioObjectID>.size)
         guard AudioObjectGetPropertyData(system, &defaultOutput, 0, nil, &size, &volumeDevice) == noErr else {
             NSLog("Niche cannot read the default output device")
             return
         }
+        var volume = AudioObjectPropertyAddress(mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+                                                mScope: kAudioDevicePropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
+        var mute = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyMute,
+                                              mScope: kAudioDevicePropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
+        var settable = DarwinBoolean(false)
+        volumeSettable = AudioObjectHasProperty(volumeDevice, &volume)
+            && AudioObjectIsPropertySettable(volumeDevice, &volume, &settable) == noErr && settable.boolValue
+        volumeMutable = AudioObjectHasProperty(volumeDevice, &mute)
         for selector in [kAudioHardwareServiceDeviceProperty_VirtualMainVolume, kAudioDevicePropertyMute] {
             var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioDevicePropertyScopeOutput,
                                                      mElement: kAudioObjectPropertyElementMain)
             guard AudioObjectHasProperty(volumeDevice, &address) else { continue }
-            let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-                Task { @MainActor in self?.readVolume() }
+            let volumeChanged: AudioObjectPropertyListenerProc = { _, _, _, _ in
+                Task { @MainActor in LiveActivityCenter.shared?.readVolume() }
+                return noErr
             }
-            AudioObjectAddPropertyListenerBlock(volumeDevice, &address, .main, block)
-            audioListeners.append((volumeDevice, address, block))
+            AudioObjectAddPropertyListener(volumeDevice, &address, volumeChanged, nil)
+            audioListeners.append((volumeDevice, address, volumeChanged))
         }
         readVolume()
     }

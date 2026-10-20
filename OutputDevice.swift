@@ -12,14 +12,23 @@ final class OutputDevice {
     var isShowingVolume = false
 
     @ObservationIgnored private var device = AudioObjectID(kAudioObjectUnknown)
-    @ObservationIgnored private var listeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
+    @ObservationIgnored private var listeners: [(AudioObjectID, AudioObjectPropertyAddress)] = []
+
+    private static let deviceChanged: AudioObjectPropertyListenerProc = { _, _, _, context in
+        let device = Unmanaged<OutputDevice>.fromOpaque(context!).takeUnretainedValue()
+        Task { @MainActor in device.follow() }
+        return noErr
+    }
+    private static let propertyChanged: AudioObjectPropertyListenerProc = { _, _, _, context in
+        let device = Unmanaged<OutputDevice>.fromOpaque(context!).takeUnretainedValue()
+        Task { @MainActor in device.read() }
+        return noErr
+    }
 
     func start() {
         var address = Self.address(kAudioHardwarePropertyDefaultOutputDevice, scope: kAudioObjectPropertyScopeGlobal)
-        let changed: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            Task { @MainActor in self?.follow() }
-        }
-        AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, .main, changed)
+        AudioObjectAddPropertyListener(AudioObjectID(kAudioObjectSystemObject), &address, Self.deviceChanged,
+                                       Unmanaged.passUnretained(self).toOpaque())
         follow()
     }
 
@@ -41,9 +50,9 @@ final class OutputDevice {
     }
 
     private func follow() {
-        for (object, address, block) in listeners {
+        for (object, address) in listeners {
             var address = address
-            AudioObjectRemovePropertyListenerBlock(object, &address, .main, block)
+            AudioObjectRemovePropertyListener(object, &address, Self.propertyChanged, Unmanaged.passUnretained(self).toOpaque())
         }
         listeners = []
         var address = Self.address(kAudioHardwarePropertyDefaultOutputDevice, scope: kAudioObjectPropertyScopeGlobal)
@@ -55,11 +64,8 @@ final class OutputDevice {
         for selector in [kAudioHardwareServiceDeviceProperty_VirtualMainVolume, kAudioDevicePropertyMute, kAudioDevicePropertyDataSource] {
             var address = Self.address(selector)
             guard AudioObjectHasProperty(device, &address) else { continue }
-            let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-                Task { @MainActor in self?.read() }
-            }
-            AudioObjectAddPropertyListenerBlock(device, &address, .main, block)
-            listeners.append((device, address, block))
+            AudioObjectAddPropertyListener(device, &address, Self.propertyChanged, Unmanaged.passUnretained(self).toOpaque())
+            listeners.append((device, address))
         }
         read()
     }
