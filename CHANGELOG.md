@@ -1,5 +1,11 @@
 # changelog
 
+## 0.6.7.4
+
+- on macs without a notch, the island sits higher and slimmer, so it no longer hangs far below the menu bar.
+- the open island keeps its top right buttons clear of the rounded corner.
+- memory: about 21 mb after launch, same as 0.6.7.3 measured side by side. the download stays 2.4 mb.
+
 ## 0.6.7.3
 
 - omp's usage covers every provider it tracks, not only claude: codex, antigravity's gemini and claude & gpt, and any other with limits. each gets its own card with its own windows, like 7 day and 30 day for codex. thanks @David4rr.

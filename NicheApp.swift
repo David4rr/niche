@@ -101,10 +101,10 @@ final class LabState {
     static var hasNotch: Bool { realNotch != nil }
     static var style = NotchStyle.island
     static var isIsland: Bool { !hasNotch && style == .island }
-    static var topGap: CGFloat { isIsland ? 5 : 0 }
+    static var topGap: CGFloat { isIsland ? 3 : 0 }
     static var hardwareNotch: CGSize {
         if let realNotch { return realNotch }
-        return CGSize(width: 120, height: isIsland ? 32 : NSStatusBar.system.thickness)
+        return CGSize(width: 120, height: isIsland ? 24 : NSStatusBar.system.thickness)
     }
     static func closedSize(hasContent: Bool) -> CGSize {
         CGSize(width: hardwareNotch.width + (hasContent ? 2 * MusicClosedView.slot : 0), height: hardwareNotch.height)
@@ -518,8 +518,9 @@ struct NicheView: View {
         if let activity = lab.liveActivities.current {
             LiveActivityView(activity: activity)
                 .id(activity.kind)
-                .padding(.horizontal, 16 + 4)
+                .padding(.horizontal, 16 + (islandInset ? 16 : 4))
                 .frame(height: LabState.hardwareNotch.height)
+                .padding(.top, islandInset ? 7 : 0)
                 .modifier(ActivityFade(isShown: lab.liveActivities.isShowing))
                 .transition(Self.activityTransition)
         } else {
@@ -561,9 +562,12 @@ struct NicheView: View {
                 .transition(.scale(scale: 0.5).combined(with: .opacity))
             }
         }
-        .padding(.horizontal, 16 + 6)
+        .padding(.horizontal, 16 + (islandInset ? 16 : 6))
         .frame(height: LabState.hardwareNotch.height)
+        .padding(.top, islandInset ? 7 : 0)
     }
+
+    private var islandInset: Bool { lab.notchStyle == .island && !LabState.hasNotch }
 }
 
 struct ActivityFade: ViewModifier {
