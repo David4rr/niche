@@ -110,6 +110,7 @@ final class LabState {
         CGSize(width: hardwareNotch.width + (hasContent ? 2 * MusicClosedView.slot : 0), height: hardwareNotch.height)
     }
     static let openSize = CGSize(width: hardwareNotch.width + 160, height: 175)
+    static let agentsWidth = openSize.width + 40
 
     var hasClosedContent: Bool { shownFeature != nil || idleArt != nil || lockState != .none || liveActivities.current != nil }
 
@@ -174,13 +175,13 @@ final class LabState {
         let rows = showsAllAgents ? count : min(count, AgentSessionList.visibleRows)
         let more = count > AgentSessionList.visibleRows ? AgentSessionList.spacing + AgentSessionList.moreHeight : 0
         let list = CGFloat(rows) * AgentSessionList.rowHeight + CGFloat(max(rows - 1, 0)) * AgentSessionList.spacing + more
-        let usage = agents.usage.accounts.isEmpty ? 0 : UsageStrip.height(for: agents.usage.accounts) + 8
-        return Self.hardwareNotch.height + 2 + usage + list + 16
+        if agents.usage.accounts.isEmpty { return Self.hardwareNotch.height + 2 + list + 16 }
+        return 18 + UsageStrip.height + 12 + list + 16
     }
 
     var currentSize: CGSize {
         if controller.isExpanded && openFeature == .agents {
-            return CGSize(width: Self.openSize.width, height: agentsHeight)
+            return CGSize(width: agents.usage.accounts.isEmpty ? Self.openSize.width : Self.agentsWidth, height: agentsHeight)
         }
         if controller.isExpanded {
             return CGSize(width: Self.openSize.width, height: Self.openSize.height + activityRoom + volumeRoom)
@@ -389,7 +390,7 @@ struct NicheView: View {
                     ZStack(alignment: .top) {
                         Group {
                             if lab.openFeature == .agents {
-                                VStack(spacing: 8) {
+                                VStack(spacing: 12) {
                                     if !lab.agents.usage.accounts.isEmpty {
                                         UsageStrip(accounts: lab.agents.usage.accounts)
                                     }
@@ -400,8 +401,9 @@ struct NicheView: View {
                                         lab.setOpen(false)
                                     }
                                 }
-                                    .frame(width: LabState.openSize.width - 2 * 18, alignment: .top)
-                                    .padding(.top, LabState.hardwareNotch.height + 2)
+                                    .frame(width: (lab.agents.usage.accounts.isEmpty ? LabState.openSize.width : LabState.agentsWidth) - 2 * 18,
+                                           alignment: .top)
+                                    .padding(.top, lab.agents.usage.accounts.isEmpty ? LabState.hardwareNotch.height + 2 : 18)
                             } else if lab.openFeature == .clipboard {
                                 ClipboardView(history: lab.clipboard) { lab.pick($0) }
                                     .frame(width: LabState.openSize.width - 2 * 18,
@@ -419,7 +421,7 @@ struct NicheView: View {
                             removal: AnyTransition(.blurReplace).combined(with: .offset(x: -14))
                                 .animation(.easeIn(duration: 0.14))))
                     }
-                        .frame(width: LabState.openSize.width + 2 * 16, height: size.height, alignment: .top)
+                        .frame(width: size.width + 2 * 16, height: size.height, alignment: .top)
                         .overlay(alignment: .top) { topRow }
                         .drawingGroup()
                         .blur(radius: c.isSharp ? 0 : 5)

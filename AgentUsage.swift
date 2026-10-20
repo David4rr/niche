@@ -133,99 +133,190 @@ final class AgentUsage {
 
 struct UsageStrip: View {
     let accounts: [UsageAccount]
+    @State private var hovered: String?
 
-    static func columns(for accounts: [UsageAccount]) -> Int {
-        accounts.count == 4 ? 2 : min(accounts.count, 3)
-    }
-
-    static func height(for accounts: [UsageAccount]) -> CGFloat {
-        let rows = CGFloat((accounts.count + columns(for: accounts) - 1) / columns(for: accounts))
-        return rows * cardHeight(for: accounts) + (rows - 1) * 6
-    }
-
-    private static func cardHeight(for accounts: [UsageAccount]) -> CGFloat {
-        28 + 14 * CGFloat(accounts.reduce(0) { max($0, $1.windows.count) })
-    }
+    static let height: CGFloat = 56 + 12 + 24
 
     var body: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: Self.columns(for: accounts)), spacing: 6) {
-            ForEach(accounts) { account in
-                UsageCard(account: account)
-                    .frame(height: Self.cardHeight(for: accounts))
-                    .transition(.scale(scale: 0.9).combined(with: .opacity))
+        let idle = accounts.filter(\.isIdle)
+        let folds = idle.count > 1
+        let shown = folds ? accounts.filter { !$0.isIdle } : accounts
+        VStack(alignment: .leading, spacing: 12) {
+            hero(idle: idle)
+            ViewThatFits(in: .horizontal) {
+                chips(shown, idle: folds ? idle : [], named: true, percent: true)
+                chips(shown, idle: folds ? idle : [], named: true, percent: false)
+                chips(shown, idle: folds ? idle : [], named: false, percent: false)
             }
         }
-        .frame(height: Self.height(for: accounts))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: Self.height, alignment: .top)
+    }
+
+    private var tightest: UsageAccount? {
+        accounts.max { $0.peak < $1.peak }
+    }
+
+    private func hero(idle: [UsageAccount]) -> some View {
+        let focus = hovered == "idle" ? nil : accounts.first { $0.id == hovered } ?? tightest
+        let key = hovered ?? "tightest"
+        return HStack(spacing: 14) {
+            ZStack {
+                if let focus {
+                    UsageRing(account: focus, lineWidth: 6, gap: 8.5)
+                    AgentGlyph(kind: focus.kind, size: 13)
+                        .id(focus.kind)
+                        .transition(.blurReplace)
+                } else {
+                    Circle().stroke(.white.opacity(0.12), lineWidth: 6).padding(3)
+                    Text("+\(idle.count)")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+            }
+            .frame(width: 56, height: 56)
+            VStack(alignment: .leading, spacing: 1) {
+                ZStack(alignment: .leading) {
+                    Text(focus.map(\.title) ?? "under 5%")
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .id(key)
+                        .transition(.blurReplace(.downUp))
+                }
+                .frame(height: 17)
+                ZStack(alignment: .leading) {
+                    Group {
+                        if let focus {
+                            Text(Self.windows(focus)) + Text(Self.reset(focus).map { "  ·  resets in \($0)" } ?? "").foregroundStyle(.white.opacity(0.32))
+                        } else {
+                            Text(idle.map(\.name).joined(separator: ", "))
+                        }
+                    }
+                    .font(.system(size: 12.5, weight: .regular).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(1)
+                    .id(key)
+                    .transition(.blurReplace(.downUp))
+                }
+                .frame(height: 16)
+            }
+            .padding(.top, max(LabState.hardwareNotch.height + 2 - 18, 0))
+            .frame(maxHeight: .infinity, alignment: .top)
+            Spacer(minLength: 0)
+        }
+        .frame(height: 56)
+        .animation(.spring(Spring(duration: 0.38, bounce: 0.25), blendDuration: 0), value: key)
+    }
+
+    private func chips(_ shown: [UsageAccount], idle: [UsageAccount], named: Bool, percent: Bool) -> some View {
+        HStack(spacing: 4) {
+            ForEach(shown) { account in
+                UsageChip(isHovered: hovered == account.id) {
+                    UsageRing(account: account, lineWidth: 2.4, gap: 4.2)
+                        .padding(1.2)
+                        .frame(width: 18, height: 18)
+                    if named {
+                        Text(account.name)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                    if percent {
+                        Text("\(Int((account.peak * 100).rounded()))%")
+                            .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(UsageRing.tint(account.kind, account.peak))
+                            .fixedSize()
+                    }
+                }
+                .onHover { hover(account.id, $0) }
+                .transition(.scale(scale: 0.8).combined(with: .opacity))
+            }
+            if !idle.isEmpty {
+                UsageChip(isHovered: hovered == "idle") {
+                    Text("+\(idle.count) low")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .fixedSize()
+                        .padding(.leading, 5)
+                }
+                .onHover { hover("idle", $0) }
+                .transition(.scale(scale: 0.8).combined(with: .opacity))
+            }
+        }
+    }
+
+    private func hover(_ id: String, _ inside: Bool) {
+        if inside {
+            hovered = id
+            return
+        }
+        Task {
+            try? await Task.sleep(for: .seconds(0.12))
+            if hovered == id { hovered = nil }
+        }
+    }
+
+    private static func windows(_ account: UsageAccount) -> String {
+        account.windows.map { "\($0.label) \(Int(($0.used * 100).rounded()))%" }.joined(separator: "  ·  ")
+    }
+
+    private static func reset(_ account: UsageAccount) -> String? {
+        guard let window = account.windows.max(by: { $0.used < $1.used }), window.used >= 0.005, let date = window.resetsAt else { return nil }
+        let minutes = Int(max(date.timeIntervalSinceNow, 0) / 60)
+        let left = minutes >= 1440 ? "\(minutes / 1440)d" : minutes >= 60 ? "\(minutes / 60)h" : "\(max(minutes, 1))m"
+        return account.windows.count > 1 ? "\(left) (\(window.label))" : left
     }
 }
 
-private struct UsageCard: View {
-    let account: UsageAccount
-    @State private var isHovered = false
+private extension UsageAccount {
+    var peak: Double { windows.reduce(0) { max($0, $1.used) } }
+    var isIdle: Bool { peak < 0.05 }
+    var title: String {
+        let base = kind == .omp ? "omp \(name)" : name
+        return detail.map { "\(base) (\($0))" } ?? base
+    }
+}
+
+private struct UsageChip<Content: View>: View {
+    let isHovered: Bool
+    @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 5) {
-                AgentGlyph(kind: account.kind, size: 10)
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 4) {
-                        name
-                        if let detail = account.detail {
-                            Text(detail)
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.4))
-                        }
-                    }
-                    name
-                }
+        HStack(spacing: 5) { content }
+            .padding(.leading, 3)
+            .padding(.trailing, 8)
+            .frame(height: 24)
+            .background(Capsule().fill(.white.opacity(isHovered ? 0.13 : 0.06)))
+            .animation(.easeOut(duration: 0.12), value: isHovered)
+    }
+}
+
+private struct UsageRing: View {
+    let account: UsageAccount
+    let lineWidth: CGFloat
+    let gap: CGFloat
+
+    var body: some View {
+        ZStack {
+            ForEach(Array(account.windows.reversed().enumerated()), id: \.offset) { index, window in
+                let used = min(max(window.used, 0), 1)
+                Circle()
+                    .stroke(.white.opacity(0.12), lineWidth: lineWidth)
+                    .padding(CGFloat(index) * gap)
+                Circle()
+                    .trim(from: 0, to: used)
+                    .stroke(Self.tint(account.kind, used), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .padding(CGFloat(index) * gap)
             }
-            ForEach(account.windows, id: \.label) { meter($0) }
         }
-        .padding(.horizontal, 9)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(isHovered ? 0.1 : 0.06)))
-        .onHover { isHovered = $0 }
-        .animation(.easeOut(duration: 0.12), value: isHovered)
+        .padding(lineWidth / 2)
     }
 
-    private var name: some View {
-        Text(account.name)
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.85))
-            .lineLimit(1)
-    }
-
-    private func meter(_ window: UsageWindow) -> some View {
-        let used = min(max(window.used, 0), 1)
-        let tint = used >= 0.85 ? Color(red: 1, green: 0.36, blue: 0.3)
-            : account.kind == .claude ? Color(red: 0.85, green: 0.47, blue: 0.34) : Color(red: 0.55, green: 0.76, blue: 1)
-        let reset = window.resetsAt.map { Self.short(max($0.timeIntervalSinceNow, 0)) } ?? "–"
-        return HStack(spacing: 5) {
-            Text(window.label)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.white.opacity(0.4))
-                .fixedSize()
-                .frame(width: 19, alignment: .leading)
-            Capsule()
-                .fill(.white.opacity(0.1))
-                .overlay(alignment: .leading) {
-                    GeometryReader { proxy in
-                        Capsule().fill(tint).frame(width: max(proxy.size.width * used, used > 0 ? 3 : 0))
-                    }
-                }
-                .frame(height: 4)
-            Text(isHovered ? reset : "\(Int((used * 100).rounded()))%")
-                .font(.system(size: 9, weight: .semibold).monospacedDigit())
-                .foregroundStyle(.white.opacity(isHovered ? 0.55 : 0.8))
-                .contentTransition(.interpolate)
-                .frame(width: 26, alignment: .trailing)
-        }
-    }
-
-    private static func short(_ seconds: TimeInterval) -> String {
-        let minutes = Int(seconds / 60)
-        if minutes >= 1440 { return "\(minutes / 1440)d" }
-        if minutes >= 60 { return "\(minutes / 60)h" }
-        return "\(max(minutes, 1))m"
+    static func tint(_ kind: AgentKind, _ used: Double) -> Color {
+        if used >= 0.85 { return Color(red: 1, green: 0.36, blue: 0.3) }
+        return kind == .claude ? Color(red: 0.85, green: 0.47, blue: 0.34) : Color(red: 0.55, green: 0.76, blue: 1)
     }
 }

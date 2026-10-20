@@ -1,5 +1,12 @@
 # changelog
 
+## 0.6.7.5
+
+- the agents view leads with what matters: a big ring next to the notch shows the account closest to its limit, with its limits and when they reset.
+- every account is a small chip under it. hover one to bring it into the big ring. accounts under 5% fold into one "low" chip.
+- the view is a little wider, so names stay readable.
+- memory: about 21 mb after launch, same as 0.6.7.4 measured side by side. the download stays 2.4 mb.
+
 ## 0.6.7.4
 
 - on macs without a notch, the island sits higher and slimmer, so it no longer hangs far below the menu bar.
