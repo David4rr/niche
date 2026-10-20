@@ -101,17 +101,3 @@ struct IdleArtView: View {
         Image(decorative: frame, scale: 2).resizable().interpolation(.high).scaledToFit()
     }
 }
-
-struct IdleClosedView: View {
-    let art: IdleArt
-
-    var body: some View {
-        HStack(spacing: 0) {
-            IdleArtView(art: art, size: 24, cornerRadius: 7)
-                .offset(y: -1)
-                .padding(.leading, 5)
-                .frame(width: MusicClosedView.slot, alignment: .leading)
-            Spacer(minLength: 0)
-        }
-    }
-}

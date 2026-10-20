@@ -62,6 +62,7 @@ struct NotchSquashModifier: ViewModifier {
 struct NotchShape: Shape {
     var topCornerRadius: CGFloat
     var bottomCornerRadius: CGFloat
+    var isIsland = false
 
     var animatableData: AnimatablePair<CGFloat, CGFloat> {
         get { .init(topCornerRadius, bottomCornerRadius) }
@@ -69,8 +70,11 @@ struct NotchShape: Shape {
     }
 
     func path(in rect: CGRect) -> Path {
-        var p = Path()
         let t = topCornerRadius, b = bottomCornerRadius
+        if isIsland {
+            return RoundedRectangle(cornerRadius: min(b, rect.height / 2), style: .continuous).path(in: rect.insetBy(dx: t, dy: 0))
+        }
+        var p = Path()
         p.move(to: CGPoint(x: rect.minX, y: rect.minY))
         p.addQuadCurve(to: CGPoint(x: rect.minX + t, y: rect.minY + t), control: CGPoint(x: rect.minX + t, y: rect.minY))
         p.addLine(to: CGPoint(x: rect.minX + t, y: rect.maxY - b))

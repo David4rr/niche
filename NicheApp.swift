@@ -26,6 +26,10 @@ final class LabState {
     var showLockIndicator: Bool {
         didSet { UserDefaults.standard.set(showLockIndicator, forKey: "showLockIndicator") }
     }
+    enum NotchStyle: String { case island, notch }
+    var notchStyle: NotchStyle {
+        didSet { UserDefaults.standard.set(notchStyle.rawValue, forKey: "notchStyle"); Self.style = notchStyle }
+    }
     enum LockState { case none, locked, unlocking }
     private(set) var lockState = LockState.none
     private(set) var lockShown = false
@@ -47,13 +51,15 @@ final class LabState {
     init() {
         let defaults = UserDefaults.standard
         defaults.register(defaults: ["showInMenuBar": true, "liveVisualizer": false, "showAgents": true,
-                                     "showClaude": true, "showOmp": true, "showLockIndicator": true])
+                                     "showClaude": true, "showOmp": true, "showLockIndicator": true, "notchStyle": "island"])
         self.showInMenuBar = defaults.bool(forKey: "showInMenuBar")
         self.liveVisualizer = defaults.bool(forKey: "liveVisualizer")
         self.showAgents = defaults.bool(forKey: "showAgents")
         self.showClaude = defaults.bool(forKey: "showClaude")
         self.showOmp = defaults.bool(forKey: "showOmp")
         self.showLockIndicator = defaults.bool(forKey: "showLockIndicator")
+        self.notchStyle = NotchStyle(rawValue: defaults.string(forKey: "notchStyle")!)!
+        Self.style = notchStyle
         player.spectrum.isEnabled = liveVisualizer
         applyAgentSettings()
         agents.onFinished = { [weak self] session in
@@ -86,13 +92,20 @@ final class LabState {
         if showAgents && showOmp { kinds.insert(.omp) }
         agents.enabled = kinds
     }
-    static let hardwareNotch: CGSize = {
+    private static let realNotch: CGSize? = {
         guard let screen = NSScreen.main else { fatalError("no screen available") }
-        guard let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea else {
-            return CGSize(width: 185, height: 32)
-        }
+        guard !UserDefaults.standard.bool(forKey: "simulateNoNotch"),
+              let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea else { return nil }
         return CGSize(width: screen.frame.width - left.width - right.width, height: screen.safeAreaInsets.top)
     }()
+    static var hasNotch: Bool { realNotch != nil }
+    static var style = NotchStyle.island
+    static var isIsland: Bool { !hasNotch && style == .island }
+    static var topGap: CGFloat { isIsland ? 5 : 0 }
+    static var hardwareNotch: CGSize {
+        if let realNotch { return realNotch }
+        return CGSize(width: 120, height: isIsland ? 32 : NSStatusBar.system.thickness)
+    }
     static func closedSize(hasContent: Bool) -> CGSize {
         CGSize(width: hardwareNotch.width + (hasContent ? 2 * MusicClosedView.slot : 0), height: hardwareNotch.height)
     }
@@ -172,12 +185,14 @@ final class LabState {
             return CGSize(width: Self.openSize.width, height: Self.openSize.height + activityRoom + volumeRoom)
         }
         let size = Self.closedSize(hasContent: hasClosedContent)
-        let room = agentsRoom
+        let room = closedRoom
         return CGSize(width: size.width + room.left + room.right + levelRoom, height: size.height)
     }
 
-    var agentsRoom: (left: CGFloat, right: CGFloat) {
-        guard !controller.isExpanded, lockState == .none, liveActivities.current == nil, shownFeature == .agents else { return (0, 0) }
+    var closedRoom: (left: CGFloat, right: CGFloat) {
+        guard !controller.isExpanded, lockState == .none, liveActivities.current == nil else { return (0, 0) }
+        if shownFeature == nil { return idleArt != nil ? (-5, -MusicClosedView.slot) : (0, 0) }
+        guard shownFeature == .agents else { return (0, 0) }
         let kinds = AgentKind.allCases.filter { !agents.sessions(of: $0).isEmpty }.count
         guard kinds > 1 else { return (0, 0) }
         return idleArt != nil ? (0, 26) : (10, 0)
@@ -189,7 +204,7 @@ final class LabState {
     }
 
     var closedOffset: CGFloat {
-        let room = agentsRoom
+        let room = closedRoom
         return (room.right + levelRoom - room.left) / 2
     }
 
@@ -360,12 +375,14 @@ struct NicheView: View {
     var body: some View {
         let c = lab.controller
         let size = lab.currentSize
-        let radii = c.isRounded ? (top: 16.0, bottom: 22.0) : (top: 8.0, bottom: 12.0)
+        let island = lab.notchStyle == .island && !LabState.hasNotch
+        let radii = c.isRounded ? (top: 16.0, bottom: 22.0) : (top: 8.0, bottom: island ? size.height / 2 : 12.0)
         let outlineWidth = size.width + 2 * radii.top
+        let shape = NotchShape(topCornerRadius: radii.top, bottomCornerRadius: radii.bottom, isIsland: island)
 
         VStack(spacing: 0) {
             ZStack(alignment: .top) {
-                NotchShape(topCornerRadius: radii.top, bottomCornerRadius: radii.bottom)
+                shape
                     .fill(.black)
                 if c.isExpanded {
                     ZStack(alignment: .top) {
@@ -415,19 +432,17 @@ struct NicheView: View {
                         .transition(Self.activityTransition)
                 } else {
                     Group {
-                        if lab.shownFeature == nil, let art = lab.idleArt {
-                            IdleClosedView(art: art)
-                        } else if closedFeature == .agents {
+                        if closedFeature == .agents || (lab.shownFeature == nil && lab.idleArt != nil) {
                             AgentClosedView(monitor: lab.agents, art: lab.idleArt)
                         } else {
                             MusicClosedView(player: lab.player)
                         }
                     }
-                        .frame(width: LabState.closedSize(hasContent: true).width + lab.agentsRoom.left + lab.agentsRoom.right, height: LabState.hardwareNotch.height)
+                        .frame(width: LabState.closedSize(hasContent: true).width + lab.closedRoom.left + lab.closedRoom.right, height: LabState.hardwareNotch.height)
                         .modifier(ClosedContentFade(isShown: lab.hasClosedContent))
                         .transition(Self.closedContentTransition(afterClosing: c.isCollapsing || c.isExpanded))
                 }
-                NotchShape(topCornerRadius: radii.top, bottomCornerRadius: radii.bottom)
+                shape
                     .stroke(LinearGradient(stops: [.init(color: .white.opacity(0.28), location: 0),
                                                    .init(color: .white.opacity(0.28), location: 0.25),
                                                    .init(color: .white.opacity(0), location: 0.75)],
@@ -438,9 +453,9 @@ struct NicheView: View {
                     .allowsHitTesting(false)
             }
             .frame(width: outlineWidth, height: size.height, alignment: .top)
-            .clipShape(NotchShape(topCornerRadius: radii.top, bottomCornerRadius: radii.bottom))
+            .clipShape(shape)
             .background {
-                NotchShape(topCornerRadius: radii.top, bottomCornerRadius: radii.bottom)
+                shape
                     .fill(.black)
                     .shadow(color: .black.opacity(c.isExpanded ? 0.55 : 0), radius: 14, y: 4)
                     .animation(.easeOut(duration: 0.35), value: c.isExpanded)
@@ -448,6 +463,7 @@ struct NicheView: View {
             .modifier(NotchSquashModifier(controller: c))
             .offset(x: lab.closedOffset)
             .animation(closedResize, value: lab.closedOffset)
+            .padding(.top, LabState.topGap)
             .contentShape(Rectangle())
             .onHover { lab.hover($0) }
             .onChange(of: lab.hasOpenableContent) { _, has in if !has { lab.setOpen(false) } }
@@ -753,8 +769,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let update: (NSEvent) -> Void = { [weak self] _ in
             guard let self else { return }
             let notch = self.lab.currentSize
-            let hit = NSRect(x: frame.midX + self.lab.closedOffset - notch.width / 2 - 8, y: frame.maxY - notch.height - 8,
-                             width: notch.width + 16, height: notch.height + 8)
+            let gap = LabState.topGap
+            let hit = NSRect(x: frame.midX + self.lab.closedOffset - notch.width / 2 - 8, y: frame.maxY - gap - notch.height - 8,
+                             width: notch.width + 16, height: gap + notch.height + 8)
             self.panel.ignoresMouseEvents = !hit.contains(NSEvent.mouseLocation)
         }
         monitors.append(NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved, handler: update) as Any)

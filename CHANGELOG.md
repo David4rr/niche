@@ -1,5 +1,12 @@
 # changelog
 
+## 0.6.7
+
+- macs without a notch, like the m1 macbook air, get one. pick island, a pill floating just below the top of the screen, or notch, a small one at the menu bar's height. it's in settings, general.
+- with only the notch image showing, the notch grows on the left for it and leaves no empty space on the right.
+- the notch image no longer blinks when agent sessions start or end. it stays put and the agents slide in next to it.
+- memory: about 21 mb after launch, same as 0.6.6 measured side by side. the download stays 2.4 mb.
+
 ## 0.6.6
 
 - volume and brightness keys no longer freeze the keyboard or bring back the macOS popup. niche kept piling up volume listeners every time the output device or a live activity setting changed, so after a while one key press ran hundreds of volume reads at once. they now come off properly, and the volume and brightness changes themselves run in the background.

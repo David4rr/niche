@@ -470,7 +470,7 @@ struct AgentClosedView: View {
     @State private var lastSessions: [AgentSession] = []
 
     var body: some View {
-        let sessions = monitor.isEmpty ? lastSessions : monitor.sessions
+        let sessions = monitor.isEmpty ? (art == nil ? lastSessions : []) : monitor.sessions
         let live = AgentKind.allCases.filter { kind in sessions.contains { $0.kind == kind } }
         let working = sessions.filter { $0.state == .working }.count
         let count = Text("\(working > 0 ? working : sessions.count)")
@@ -485,17 +485,20 @@ struct AgentClosedView: View {
                     .frame(width: MusicClosedView.slot, alignment: .leading)
                     .transition(.opacity)
                 Spacer(minLength: 0)
-                HStack(spacing: 7) {
-                    HStack(spacing: 9) {
-                        ForEach(live, id: \.self) { kind in
-                            AgentIndicator(kind: kind, sessions: sessions.filter { $0.kind == kind })
-                                .transition(.scale(scale: 0.5).combined(with: .opacity))
+                if !sessions.isEmpty {
+                    HStack(spacing: 7) {
+                        HStack(spacing: 9) {
+                            ForEach(live, id: \.self) { kind in
+                                AgentIndicator(kind: kind, sessions: sessions.filter { $0.kind == kind })
+                                    .transition(.scale(scale: 0.5).combined(with: .opacity))
+                            }
                         }
+                        count
                     }
-                    count
+                    .padding(.trailing, 9)
+                    .offset(y: -2)
+                    .transition(.scale(scale: 0.5).combined(with: .opacity))
                 }
-                .padding(.trailing, 9)
-                .offset(y: -2)
             } else {
                 HStack(spacing: 8) {
                     ForEach(live, id: \.self) { kind in
