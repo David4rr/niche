@@ -48,7 +48,7 @@ final class AgentMonitor {
             Task { @MainActor in
                 guard let self else { return }
                 let live = found.filter { self.enabled.contains($0.kind) }
-                if !live.isEmpty { self.usage.refresh(kinds: self.enabled) }
+                if !self.enabled.isEmpty { self.usage.refresh(kinds: self.enabled) }
                 guard self.sessions != live else { return }
                 let wasWorking = Set(self.sessions.filter { $0.state == .working }.map(\.id))
                 for session in live where session.state == .paused && wasWorking.contains(session.id) {
@@ -215,7 +215,7 @@ final class AgentMonitor {
     nonisolated private static func ompSessions() -> [AgentSession] {
         let rows = run("/bin/ps", ["-Ao", "pid=,ppid=,command="]).split(separator: "\n").compactMap { line -> (pid: String, ppid: String, resume: String?)? in
             let parts = line.split(separator: " ")
-            guard parts.count >= 3, let omp = parts.dropFirst(2).firstIndex(where: { $0.hasSuffix("/bin/omp") }) else { return nil }
+            guard parts.count >= 3, let omp = parts.dropFirst(2).firstIndex(where: { $0 == "omp" || $0.hasSuffix("/omp") }) else { return nil }
             let args = parts[(omp + 1)...]
             let resume = args.firstIndex(of: "--resume").flatMap { args.index(after: $0) < args.endIndex ? String(args[args.index(after: $0)]) : nil }
             return (String(parts[0]), String(parts[1]), resume)

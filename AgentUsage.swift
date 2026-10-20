@@ -3,8 +3,15 @@ import Foundation
 import SwiftUI
 
 struct UsageWindow: Equatable {
+    let label: String
     let used: Double
     let resetsAt: Date?
+
+    init(label: String = "", used: Double, resetsAt: Date?) {
+        self.label = label
+        self.used = used
+        self.resetsAt = resetsAt
+    }
 }
 
 struct UsageAccount: Identifiable, Equatable {
@@ -28,7 +35,7 @@ final class AgentUsage {
         fetchedAt = Date()
         Task {
             var fresh = kinds.contains(.claude) ? await Self.claudeAccounts() : []
-            if kinds.contains(.omp), let omp = await Self.ompAccount() { fresh.append(omp) }
+            if kinds.contains(.omp) { fresh.append(contentsOf: await Self.ompAccounts()) }
             let kept = accounts.filter { old in kinds.contains(old.kind) && !fresh.contains { $0.id == old.id } }
             let merged = (fresh + kept).sorted { ($0.kind == .omp ? 1 : 0, $0.id) < ($1.kind == .omp ? 1 : 0, $1.id) }
             guard merged != accounts else { return }
@@ -58,7 +65,7 @@ final class AgentUsage {
             guard let (data, response) = try? await URLSession.shared.data(for: request),
                   (response as? HTTPURLResponse)?.statusCode == 200,
                   let usage = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let five = window(usage["five_hour"]), let seven = window(usage["seven_day"]) else {
+                  let five = window(usage["five_hour"], label: "5h"), let seven = window(usage["seven_day"], label: "7d") else {
                 NSLog("Niche could not fetch %@ usage", folder)
                 continue
             }
@@ -68,37 +75,95 @@ final class AgentUsage {
         }
         return found
 
-        func window(_ value: Any?) -> UsageWindow? {
+        func window(_ value: Any?, label: String = "") -> UsageWindow? {
             guard let entry = value as? [String: Any], let used = entry["utilization"] as? Double else { return nil }
             let reset = (entry["resets_at"] as? String).flatMap {
                 ISO8601DateFormatter().date(from: $0.replacingOccurrences(of: #"\.\d+"#, with: "", options: .regularExpression))
             }
-            return UsageWindow(used: used / 100, resetsAt: reset)
+            return UsageWindow(label: label, used: used / 100, resetsAt: reset)
         }
     }
 
-    nonisolated private static func ompAccount() async -> UsageAccount? {
+    nonisolated private static func ompAccounts() async -> [UsageAccount] {
         let db = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".omp/agent/agent.db").path
         let query = """
-            select u.limit_id, u.used_fraction, u.resets_at from usage_history u
-            join (select max(id) id from usage_history where provider = 'anthropic' and limit_id in ('anthropic:5h', 'anthropic:7d')
-                  group by account_key, limit_id) latest on latest.id = u.id
-            where exists (select 1 from auth_credentials a where a.provider = 'anthropic' and a.disabled_cause is null
-                          and u.account_key like '%' || a.identity_key)
+            select u.provider, u.limit_id, u.label, u.window_label, u.used_fraction, u.resets_at
+            from usage_history u
+            join (select max(id) id from usage_history group by account_key, limit_id) latest on latest.id = u.id
+            where exists (
+                select 1 from auth_credentials a
+                where a.disabled_cause is null
+                  and (
+                      (a.identity_key is not null and u.account_key like '%' || a.identity_key || '%')
+                      or (a.identity_key is null and a.provider = u.provider)
+                  )
+            )
+            order by u.provider, u.id desc;
             """
         let output = AgentMonitor.run("/usr/bin/sqlite3", ["-readonly", "-json", db, query])
-        guard let rows = try? JSONSerialization.jsonObject(with: Data(output.utf8)) as? [[String: Any]], !rows.isEmpty else { return nil }
+        guard let rows = try? JSONSerialization.jsonObject(with: Data(output.utf8)) as? [[String: Any]], !rows.isEmpty else {
+            return []
+        }
         let now = Date()
-        func pool(_ limit: String) -> UsageWindow {
-            let entries = rows.filter { $0["limit_id"] as? String == limit }.compactMap { row -> (used: Double, reset: Date?)? in
+
+        var byProvider: [String: [[String: Any]]] = [:]
+        for row in rows {
+            guard let provider = row["provider"] as? String else { continue }
+            byProvider[provider, default: []].append(row)
+        }
+
+        func makeWindow(label: String, entries: [[String: Any]]) -> UsageWindow {
+            let valid = entries.compactMap { row -> (used: Double, reset: Date?)? in
                 guard let used = row["used_fraction"] as? Double else { return nil }
                 let reset = (row["resets_at"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
-                return (reset.map { $0 < now } == true ? 0 : used, reset)
+                let isExpired = reset.map { $0 < now } ?? false
+                return (isExpired ? 0 : used, reset)
             }
-            let next = entries.compactMap(\.reset).filter { $0 > now }.min()
-            return UsageWindow(used: entries.isEmpty ? 0 : entries.map(\.used).reduce(0, +) / Double(entries.count), resetsAt: next)
+            let maxUsed = valid.map(\.used).max() ?? 0
+            let nextReset = valid.compactMap(\.reset).filter { $0 > now }.min()
+            return UsageWindow(label: label, used: maxUsed, resetsAt: nextReset)
         }
-        return UsageAccount(id: "omp", kind: .omp, name: "omp", fiveHour: pool("anthropic:5h"), sevenDay: pool("anthropic:7d"))
+
+        var result: [UsageAccount] = []
+
+        if let antRows = byProvider["google-antigravity"] {
+            let fiveRows = antRows.filter {
+                ($0["window_label"] as? String) == "5 Hour" || (($0["limit_id"] as? String)?.contains("5h") ?? false)
+            }
+            let weekRows = antRows.filter {
+                ($0["window_label"] as? String) == "Weekly" || (($0["limit_id"] as? String)?.contains("weekly") ?? false)
+            }
+            let five = makeWindow(label: "5h", entries: fiveRows)
+            let week = makeWindow(label: "7d", entries: weekRows)
+            result.append(UsageAccount(id: "omp-antigravity", kind: .omp, name: "antigravity", fiveHour: five, sevenDay: week))
+        }
+
+        if let codexRows = byProvider["openai-codex"] {
+            let primary = makeWindow(label: "30d", entries: codexRows)
+            let empty = UsageWindow(label: "", used: 0, resetsAt: nil)
+            result.append(UsageAccount(id: "omp-codex", kind: .omp, name: "codex", fiveHour: primary, sevenDay: empty))
+        }
+
+        if let anthropicRows = byProvider["anthropic"] {
+            let five = makeWindow(label: "5h", entries: anthropicRows.filter { ($0["limit_id"] as? String) == "anthropic:5h" })
+            let week = makeWindow(label: "7d", entries: anthropicRows.filter { ($0["limit_id"] as? String) == "anthropic:7d" })
+            result.append(UsageAccount(id: "omp-anthropic", kind: .omp, name: "omp", fiveHour: five, sevenDay: week))
+        }
+
+        for (provider, providerRows) in byProvider where provider != "google-antigravity" && provider != "openai-codex" && provider != "anthropic" {
+            let fiveRows = providerRows.filter {
+                ($0["window_label"] as? String) == "5 Hour" || (($0["limit_id"] as? String)?.contains("5h") ?? false)
+            }
+            let weekRows = providerRows.filter {
+                ($0["window_label"] as? String) == "Weekly" || (($0["limit_id"] as? String)?.contains("weekly") ?? false)
+            }
+            let five = makeWindow(label: "5h", entries: fiveRows.isEmpty ? providerRows : fiveRows)
+            let week = makeWindow(label: weekRows.isEmpty ? "" : "7d", entries: weekRows)
+            let name = provider.replacingOccurrences(of: "oauth-", with: "")
+            result.append(UsageAccount(id: "omp-\(provider)", kind: .omp, name: name, fiveHour: five, sevenDay: week))
+        }
+
+        return result
     }
 }
 
@@ -107,18 +172,39 @@ struct UsageStrip: View {
     static let height: CGFloat = 56
 
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(accounts) { account in
-                UsageCard(account: account)
-                    .transition(.scale(scale: 0.9).combined(with: .opacity))
+        if accounts.count <= 2 {
+            HStack(spacing: 6) {
+                ForEach(accounts) { account in
+                    UsageCard(account: account, isScrollable: false)
+                        .transition(.scale(scale: 0.9).combined(with: .opacity))
+                }
             }
+            .frame(height: Self.height)
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 8) {
+                    ForEach(accounts) { account in
+                        UsageCard(account: account, isScrollable: true)
+                            .transition(.scale(scale: 0.9).combined(with: .opacity))
+                    }
+                }
+                .padding(.horizontal, 2)
+            }
+            .frame(height: Self.height)
+            .mask(
+                HStack(spacing: 0) {
+                    Color.black
+                    LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .leading, endPoint: .trailing)
+                        .frame(width: 14)
+                }
+            )
         }
-        .frame(height: Self.height)
     }
 }
 
 private struct UsageCard: View {
     let account: UsageAccount
+    var isScrollable: Bool = false
     @State private var isHovered = false
 
     var body: some View {
@@ -130,11 +216,13 @@ private struct UsageCard: View {
                     .foregroundStyle(.white.opacity(0.85))
                     .lineLimit(1)
             }
-            meter("5h", account.fiveHour)
-            meter("7d", account.sevenDay)
+            meter(account.fiveHour.label.isEmpty ? "5h" : account.fiveHour.label, account.fiveHour)
+            if !account.sevenDay.label.isEmpty {
+                meter(account.sevenDay.label, account.sevenDay)
+            }
         }
         .padding(.horizontal, 9)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .frame(minWidth: isScrollable ? 126 : nil, maxWidth: isScrollable ? 140 : .infinity, maxHeight: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(isHovered ? 0.1 : 0.06)))
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovered)
@@ -149,7 +237,7 @@ private struct UsageCard: View {
             Text(label)
                 .font(.system(size: 9, weight: .medium))
                 .foregroundStyle(.white.opacity(0.4))
-                .frame(width: 13, alignment: .leading)
+                .frame(width: 17, alignment: .leading)
             Capsule()
                 .fill(.white.opacity(0.1))
                 .overlay(alignment: .leading) {

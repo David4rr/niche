@@ -157,7 +157,7 @@ final class LabState {
         withAnimation(.spring(response: 0.45, dampingFraction: 0.95)) { idleArt = nil }
     }
     var showsAllAgents = false
-    var hasOpenableContent: Bool { player.track != nil || !agents.isEmpty || peekFeature == .clipboard }
+    var hasOpenableContent: Bool { player.track != nil || !agents.isEmpty || !agents.usage.accounts.isEmpty || peekFeature == .clipboard }
 
     var activityRoom: CGFloat {
         controller.isExpanded && liveActivities.current != nil && openFeature != .agents && openFeature != .clipboard
@@ -173,7 +173,7 @@ final class LabState {
         let count = agents.sessions.count
         let rows = showsAllAgents ? count : min(count, AgentSessionList.visibleRows)
         let more = count > AgentSessionList.visibleRows ? AgentSessionList.spacing + AgentSessionList.moreHeight : 0
-        let list = CGFloat(rows) * AgentSessionList.rowHeight + CGFloat(max(rows - 1, 0)) * AgentSessionList.spacing + more
+        let list = rows == 0 ? 0 : CGFloat(rows) * AgentSessionList.rowHeight + CGFloat(max(rows - 1, 0)) * AgentSessionList.spacing + more
         let usage = agents.usage.accounts.isEmpty ? 0 : UsageStrip.height + 8
         return Self.hardwareNotch.height + 2 + usage + list + 16
     }
@@ -213,7 +213,7 @@ final class LabState {
         Feature.allCases.filter {
             switch $0 {
             case .music: player.track != nil
-            case .agents: !agents.isEmpty
+            case .agents: !agents.isEmpty || !agents.usage.accounts.isEmpty
             case .clipboard: false
             }
         }
