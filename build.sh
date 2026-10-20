@@ -19,6 +19,7 @@ if [ -z "$sign_identity" ]; then
         sign_identity="Apple Development"
     else
         sign_identity="-"
+        echo "no Apple Development certificate, signing ad-hoc. macos asks for permissions again after every build." >&2
     fi
 fi
 codesign --force --sign "$sign_identity" "$framework"
