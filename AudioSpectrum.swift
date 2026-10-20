@@ -28,7 +28,7 @@ final class AudioSpectrum {
         guard target != self.pid else { return }
         self.pid = target
         levels = [Float](repeating: 0, count: Self.bands)
-        session.queue.async { [session] in
+        session.queue.async { [session, weak self] in
             session.stop()
             guard target > 0 else { return }
             do {

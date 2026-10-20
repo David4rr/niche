@@ -215,7 +215,7 @@ final class AgentMonitor {
     nonisolated private static func ompSessions() -> [AgentSession] {
         let rows = run("/bin/ps", ["-Ao", "pid=,ppid=,tty=,command="]).split(separator: "\n").compactMap { line -> (pid: String, ppid: String, tty: String)? in
             let parts = line.split(separator: " ")
-            guard parts.count >= 4, parts.dropFirst(3).contains(where: { $0.hasSuffix("/bin/omp") }) else { return nil }
+            guard parts.count >= 4, parts.dropFirst(3).contains(where: { $0 == "omp" || $0.hasSuffix("/omp") }) else { return nil }
             return (String(parts[0]), String(parts[1]), String(parts[2]))
         }
         let pids = Set(rows.map(\.pid))

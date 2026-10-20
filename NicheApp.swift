@@ -174,7 +174,7 @@ final class LabState {
         let rows = showsAllAgents ? count : min(count, AgentSessionList.visibleRows)
         let more = count > AgentSessionList.visibleRows ? AgentSessionList.spacing + AgentSessionList.moreHeight : 0
         let list = CGFloat(rows) * AgentSessionList.rowHeight + CGFloat(max(rows - 1, 0)) * AgentSessionList.spacing + more
-        let usage = agents.usage.accounts.isEmpty ? 0 : UsageStrip.height + 8
+        let usage = agents.usage.accounts.isEmpty ? 0 : UsageStrip.height(for: agents.usage.accounts) + 8
         return Self.hardwareNotch.height + 2 + usage + list + 16
     }
 

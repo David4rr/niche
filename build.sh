@@ -13,7 +13,16 @@ framework="$app/Contents/Resources/MediaRemoteAdapter.framework"
 cp -R vendor/mediaremote-adapter/MediaRemoteAdapter.framework "$app/Contents/Resources/"
 lipo -thin arm64e -output "$framework/Versions/A/MediaRemoteAdapter" vendor/mediaremote-adapter/MediaRemoteAdapter.framework/Versions/A/MediaRemoteAdapter
 strip -x "$framework/Versions/A/MediaRemoteAdapter" 2>/dev/null
-codesign --force --sign "Apple Development" "$framework"
+sign_identity="${CODE_SIGN_IDENTITY:-}"
+if [ -z "$sign_identity" ]; then
+    if security find-identity -p codesigning -v 2>/dev/null | grep -q "Apple Development"; then
+        sign_identity="Apple Development"
+    else
+        sign_identity="-"
+        echo "no Apple Development certificate, signing ad-hoc. macos asks for permissions again after every build." >&2
+    fi
+fi
+codesign --force --sign "$sign_identity" "$framework"
 
 xcrun swiftc -Osize -wmo -parse-as-library -target arm64-apple-macos15.0 -Xlinker -dead_strip \
     -o "$app/Contents/MacOS/Niche" NotchAnimation.swift AudioSpectrum.swift MusicLab.swift OutputDevice.swift Headphones.swift AgentSessions.swift AgentUsage.swift LiveActivities.swift Updater.swift Clipboard.swift IdleArt.swift Onboarding.swift SettingsView.swift NicheApp.swift
@@ -43,7 +52,7 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-codesign --force --sign "Apple Development" "$app"
+codesign --force --sign "$sign_identity" "$app"
 
 staging="$out/dmg"
 mkdir -p "$staging"
