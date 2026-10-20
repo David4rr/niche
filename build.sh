@@ -16,7 +16,7 @@ strip -x "$framework/Versions/A/MediaRemoteAdapter" 2>/dev/null
 codesign --force --sign "Apple Development" "$framework"
 
 xcrun swiftc -Osize -wmo -parse-as-library -target arm64-apple-macos15.0 -Xlinker -dead_strip \
-    -o "$app/Contents/MacOS/Niche" NotchAnimation.swift AudioSpectrum.swift MusicLab.swift OutputDevice.swift Headphones.swift AgentSessions.swift LiveActivities.swift Updater.swift Clipboard.swift IdleArt.swift Onboarding.swift SettingsView.swift NicheApp.swift
+    -o "$app/Contents/MacOS/Niche" NotchAnimation.swift AudioSpectrum.swift MusicLab.swift OutputDevice.swift Headphones.swift AgentSessions.swift AgentUsage.swift LiveActivities.swift Updater.swift Clipboard.swift IdleArt.swift Onboarding.swift SettingsView.swift NicheApp.swift
 strip -x "$app/Contents/MacOS/Niche"
 
 xcrun actool AppIcon.icon --compile "$app/Contents/Resources" --platform macosx --minimum-deployment-target 15.0 \
@@ -31,8 +31,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
     <key>CFBundleName</key><string>Niche</string>
     <key>CFBundleExecutable</key><string>Niche</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.6.7.1</string>
-    <key>CFBundleVersion</key><string>39</string>
+    <key>CFBundleShortVersionString</key><string>0.6.7.2</string>
+    <key>CFBundleVersion</key><string>40</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleIconName</key><string>AppIcon</string>
     <key>LSMinimumSystemVersion</key><string>15.0</string>

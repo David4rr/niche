@@ -174,7 +174,8 @@ final class LabState {
         let rows = showsAllAgents ? count : min(count, AgentSessionList.visibleRows)
         let more = count > AgentSessionList.visibleRows ? AgentSessionList.spacing + AgentSessionList.moreHeight : 0
         let list = CGFloat(rows) * AgentSessionList.rowHeight + CGFloat(max(rows - 1, 0)) * AgentSessionList.spacing + more
-        return Self.hardwareNotch.height + 2 + list + 16
+        let usage = agents.usage.accounts.isEmpty ? 0 : UsageStrip.height + 8
+        return Self.hardwareNotch.height + 2 + usage + list + 16
     }
 
     var currentSize: CGSize {
@@ -388,11 +389,16 @@ struct NicheView: View {
                     ZStack(alignment: .top) {
                         Group {
                             if lab.openFeature == .agents {
-                                AgentSessionList(sessions: lab.agents.sessions, showsAll: lab.showsAllAgents, onToggleAll: {
-                                    withAnimation(.spring(Spring(duration: 0.4, bounce: 0.2), blendDuration: 0)) { lab.showsAllAgents.toggle() }
-                                }) { session in
-                                    lab.agents.focus(session)
-                                    lab.setOpen(false)
+                                VStack(spacing: 8) {
+                                    if !lab.agents.usage.accounts.isEmpty {
+                                        UsageStrip(accounts: lab.agents.usage.accounts)
+                                    }
+                                    AgentSessionList(sessions: lab.agents.sessions, showsAll: lab.showsAllAgents, onToggleAll: {
+                                        withAnimation(.spring(Spring(duration: 0.4, bounce: 0.2), blendDuration: 0)) { lab.showsAllAgents.toggle() }
+                                    }) { session in
+                                        lab.agents.focus(session)
+                                        lab.setOpen(false)
+                                    }
                                 }
                                     .frame(width: LabState.openSize.width - 2 * 18, alignment: .top)
                                     .padding(.top, LabState.hardwareNotch.height + 2)

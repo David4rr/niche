@@ -20,6 +20,7 @@ struct AgentSession: Identifiable, Equatable {
 @Observable
 final class AgentMonitor {
     private(set) var sessions: [AgentSession] = []
+    let usage = AgentUsage()
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private let queue = DispatchQueue(label: "niche.agents", qos: .utility)
     @ObservationIgnored var enabled: Set<AgentKind> = [] {
@@ -47,6 +48,7 @@ final class AgentMonitor {
             Task { @MainActor in
                 guard let self else { return }
                 let live = found.filter { self.enabled.contains($0.kind) }
+                if !live.isEmpty { self.usage.refresh(kinds: self.enabled) }
                 guard self.sessions != live else { return }
                 let wasWorking = Set(self.sessions.filter { $0.state == .working }.map(\.id))
                 for session in live where session.state == .paused && wasWorking.contains(session.id) {
@@ -304,7 +306,7 @@ final class AgentMonitor {
         return start > 0 ? Array(lines.dropFirst()) : lines
     }
 
-    nonisolated private static func run(_ tool: String, _ arguments: [String]) -> String {
+    nonisolated static func run(_ tool: String, _ arguments: [String]) -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: tool)
         process.arguments = arguments
@@ -423,40 +425,32 @@ struct AgentSessionRow: View {
 
     var body: some View {
         let working = session.state == .working
-        let tint = working ? Color.green : Color.orange
+        let title = session.title ?? session.project
+        let detail = ([title == session.project ? nil : session.project, session.account] as [String?]).compactMap { $0 }
         Button(action: action) {
             HStack(spacing: 8) {
                 AgentIndicator(kind: session.kind, sessions: [session])
                     .frame(width: 16)
-                Text(session.title ?? session.project)
+                Text(title)
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
-                Text(session.project)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .fixedSize()
-                if let account = session.account {
-                    Text(account)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Capsule().strokeBorder(.white.opacity(0.25)))
-                        .fixedSize()
+                if !detail.isEmpty {
+                    Text(detail.joined(separator: " · "))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .lineLimit(1)
+                        .layoutPriority(-1)
                 }
                 Spacer(minLength: 6)
                 Text(working ? "Working" : "Paused")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(tint.opacity(0.15)))
+                    .foregroundStyle(working ? Color.green : .white.opacity(0.45))
                     .fixedSize()
             }
             .padding(.horizontal, 9)
             .frame(height: AgentSessionList.rowHeight)
-            .background(RoundedRectangle(cornerRadius: 7).fill(.white.opacity(isHovered ? 0.14 : 0.06)))
-            .contentShape(RoundedRectangle(cornerRadius: 7))
+            .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(isHovered ? 0.12 : 0.04)))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }

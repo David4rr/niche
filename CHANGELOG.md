@@ -1,5 +1,11 @@
 # changelog
 
+## 0.6.7.2
+
+- the agents view shows your usage on top: a card for each claude code account and one for omp, each with its 5 hour and 7 day limits. omp's card adds up all its anthropic accounts. hover a card to see when the limits reset.
+- session rows are lighter: the project and account sit in one grey line, and the status is plain text.
+- memory: about 21 mb after launch, same as 0.6.7.1 measured side by side. the download stays 2.4 mb.
+
 ## 0.6.7.1
 
 - the island or notch setting only shows on macs without a notch.
