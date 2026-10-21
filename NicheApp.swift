@@ -199,14 +199,18 @@ final class LabState {
             && player.track != nil && player.output.isShowingVolume ? 32 : 0
     }
 
-    var agentsHeight: CGFloat {
+    var agentsHeight: CGFloat { agentsHeight(showingAll: showsAllAgents) }
+
+    func agentsHeight(showingAll: Bool) -> CGFloat {
         let count = agents.sessions.count
-        let rows = showsAllAgents ? count : min(count, AgentSessionList.visibleRows)
+        let rows = showingAll ? count : min(count, AgentSessionList.visibleRows)
         let more = count > AgentSessionList.visibleRows ? AgentSessionList.spacing + AgentSessionList.moreHeight : 0
         let list = CGFloat(rows) * AgentSessionList.rowHeight + CGFloat(max(rows - 1, 0)) * AgentSessionList.spacing + more
         if agents.usage.accounts.isEmpty { return Self.hardwareNotch.height + 2 + list + 16 }
         return 18 + UsageStrip.height + 12 + list + 16
     }
+
+    var panelHeight: CGFloat { max(Self.openSize.height, agents.isEmpty ? 0 : agentsHeight(showingAll: true)) + 60 }
 
     var currentSize: CGSize {
         if controller.isExpanded && openFeature == .agents {
@@ -526,7 +530,7 @@ struct NicheView: View {
             )
             Spacer(minLength: 0)
         }
-        .frame(width: LabState.openSize.width + 80, height: LabState.openSize.height + 60)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(closedResize, value: lab.hasClosedContent)
     }
 
@@ -734,6 +738,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchSpace: UInt64 = 0
     private var monitors: [Any] = []
     private var playbackTimer: Timer?
+    private var shrinkTask: Task<Void, Never>?
     private var signalSources: [DispatchSourceSignal] = []
 
     static func main() {
@@ -745,7 +750,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        panel = NSPanel(contentRect: Self.panelFrame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel = NSPanel(contentRect: Self.panelFrame(height: lab.panelHeight), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
@@ -772,6 +777,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
         statusItem.isVisible = lab.showInMenuBar
         trackSettings()
+        trackPanelHeight()
 
         lab.player.start()
         lab.player.output.start()
@@ -829,15 +835,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !UserDefaults.standard.bool(forKey: "onboarded") { openOnboarding() }
     }
 
-    private static var panelFrame: NSRect {
+    private static func panelFrame(height: CGFloat) -> NSRect {
         let screen = NotchScreen.shared.screen.frame
-        let size = CGSize(width: LabState.openSize.width + 80, height: LabState.openSize.height + 60)
-        return NSRect(x: screen.midX - size.width / 2, y: screen.maxY - size.height, width: size.width, height: size.height)
+        let width = LabState.openSize.width + 80
+        return NSRect(x: screen.midX - width / 2, y: screen.maxY - height, width: width, height: height)
     }
 
     private func screenChanged() {
         NotchScreen.shared.refresh()
-        panel.setFrame(Self.panelFrame, display: true)
+        panel.setFrame(Self.panelFrame(height: lab.panelHeight), display: true)
+    }
+
+    private func trackPanelHeight() {
+        let height = withObservationTracking { lab.panelHeight } onChange: { [weak self] in
+            Task { @MainActor in self?.trackPanelHeight() }
+        }
+        shrinkTask?.cancel()
+        if height > panel.frame.height {
+            panel.setFrame(Self.panelFrame(height: height), display: true)
+        } else if height < panel.frame.height {
+            shrinkTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(0.6))
+                guard !Task.isCancelled, let self else { return }
+                self.panel.setFrame(Self.panelFrame(height: height), display: true)
+            }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

@@ -1,5 +1,10 @@
 # changelog
 
+## 0.6.7.8
+
+- the agents view no longer gets cut off at the bottom when you have more than four sessions or show them all. the notch window is sized for the full list up front, so opening stays smooth.
+- memory: about 23 mb after launch, same as 0.6.7.7 measured side by side. the download stays 2.4 mb.
+
 ## 0.6.7.7
 
 - the pyramid head notch image is a new, more detailed sprite that stands and blinks its red eyes. art by NRM on confirmo sprites.
