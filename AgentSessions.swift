@@ -434,6 +434,7 @@ struct AgentClosedView: View {
                     .offset(y: LabState.closedArtOffset)
                     .padding(.leading, LabState.closedArtLeading)
                     .frame(width: MusicClosedView.slot, alignment: .leading)
+                    .transition(.opacity)
                 Spacer(minLength: 0)
                 if !sessions.isEmpty {
                     HStack(spacing: 7) {

@@ -4,6 +4,35 @@ import SwiftUI
 
 @MainActor
 @Observable
+final class NotchScreen {
+    static let shared = NotchScreen()
+    private(set) var screen: NSScreen
+    private(set) var notch: CGSize?
+
+    private init() {
+        guard let screen = NSScreen.screens.first else { fatalError("no screen available") }
+        self.screen = screen
+        notch = Self.notch(of: screen)
+    }
+
+    func refresh() {
+        guard let screen = NSScreen.screens.first else {
+            NSLog("Niche has no screen, keeping the notch where it was")
+            return
+        }
+        self.screen = screen
+        notch = Self.notch(of: screen)
+    }
+
+    private static func notch(of screen: NSScreen) -> CGSize? {
+        guard !UserDefaults.standard.bool(forKey: "simulateNoNotch"),
+              let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea else { return nil }
+        return CGSize(width: screen.frame.width - left.width - right.width, height: screen.safeAreaInsets.top)
+    }
+}
+
+@MainActor
+@Observable
 final class LabState {
     var showInMenuBar: Bool {
         didSet { UserDefaults.standard.set(showInMenuBar, forKey: "showInMenuBar") }
@@ -92,18 +121,7 @@ final class LabState {
         if showAgents && showOmp { kinds.insert(.omp) }
         agents.enabled = kinds
     }
-    static var targetScreen: NSScreen? {
-        if let notched = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) {
-            return notched
-        }
-        return NSScreen.screens.first ?? NSScreen.main
-    }
-    private static var realNotch: CGSize? {
-        guard let screen = targetScreen else { return nil }
-        guard !UserDefaults.standard.bool(forKey: "simulateNoNotch"),
-              let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea else { return nil }
-        return CGSize(width: screen.frame.width - left.width - right.width, height: screen.safeAreaInsets.top)
-    }
+    private static var realNotch: CGSize? { NotchScreen.shared.notch }
     static var hasNotch: Bool { realNotch != nil }
     static var style = NotchStyle.island
     static var isIsland: Bool { !hasNotch && style == .island }
@@ -120,9 +138,7 @@ final class LabState {
     static func closedSize(hasContent: Bool) -> CGSize {
         CGSize(width: hardwareNotch.width + (hasContent ? 2 * MusicClosedView.slot : 0), height: hardwareNotch.height)
     }
-    static var openSize: CGSize {
-        CGSize(width: hardwareNotch.width + 160, height: 175)
-    }
+    static var openSize: CGSize { CGSize(width: hardwareNotch.width + 160, height: 175) }
     static var agentsWidth: CGFloat { openSize.width + 40 }
 
     var hasClosedContent: Bool { shownFeature != nil || idleArt != nil || lockState != .none || liveActivities.current != nil }
@@ -729,12 +745,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        guard let screen = LabState.targetScreen else { fatalError("no screen available") }
-        let size = CGSize(width: LabState.openSize.width + 80, height: LabState.openSize.height + 60)
-        let frame = NSRect(x: screen.frame.midX - size.width / 2, y: screen.frame.maxY - size.height,
-                           width: size.width, height: size.height)
-
-        panel = NSPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel = NSPanel(contentRect: Self.panelFrame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
@@ -811,23 +822,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return nil
         } as Any)
 
-        monitors.append(NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.updatePanelFrame() }
+        monitors.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.screenChanged() }
         })
 
         if !UserDefaults.standard.bool(forKey: "onboarded") { openOnboarding() }
     }
 
-    private func updatePanelFrame() {
-        guard let screen = LabState.targetScreen else { return }
+    private static var panelFrame: NSRect {
+        let screen = NotchScreen.shared.screen.frame
         let size = CGSize(width: LabState.openSize.width + 80, height: LabState.openSize.height + 60)
-        let frame = NSRect(x: screen.frame.midX - size.width / 2, y: screen.frame.maxY - size.height,
-                           width: size.width, height: size.height)
-        panel.setFrame(frame, display: true)
+        return NSRect(x: screen.midX - size.width / 2, y: screen.maxY - size.height, width: size.width, height: size.height)
+    }
+
+    private func screenChanged() {
+        NotchScreen.shared.refresh()
+        panel.setFrame(Self.panelFrame, display: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
