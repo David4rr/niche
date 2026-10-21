@@ -1,5 +1,11 @@
 # changelog
 
+## 0.6.7.6
+
+- on macs without a notch, the closed album art and idle art fit inside the island instead of clipping its round ends, and the volume and brightness bars sit centred. thanks @David4rr.
+- changing the display resolution or plugging in a monitor keeps the notch on screen and centred. before, it could slide off the top and stop opening.
+- memory: about 21 mb after launch, same as 0.6.7.5 measured side by side. the download stays 2.4 mb.
+
 ## 0.6.7.5
 
 - the agents view leads with what matters: a big ring next to the notch shows the account closest to its limit, with its limits and when they reset.
