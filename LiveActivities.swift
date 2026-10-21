@@ -523,7 +523,8 @@ struct LiveActivityView: View {
 
     static func room(for activity: LiveActivityCenter.Activity) -> CGFloat {
         switch activity.kind {
-        case .volume, .brightness, .lowBattery, .charging, .fullyCharged: 12
+        case .volume, .brightness: 40
+        case .lowBattery, .charging, .fullyCharged: 12
         case .headphonesBattery: 16
         case .headphones: activity.isOn && activity.level > 0 ? 16 : 0
         default: 0
@@ -578,7 +579,7 @@ struct LiveActivityView: View {
         case .capsLock, .focus:
             label(activity.isOn ? "On" : "Off")
         case .volume, .brightness:
-            LevelBar(level: activity.kind == .volume && !activity.isOn ? 0 : activity.level)
+            levelIndicator(activity.kind == .volume && !activity.isOn ? 0 : activity.level)
         case .lowBattery, .charging, .fullyCharged:
             label("\(Int((activity.level * 100).rounded()))%")
                 .foregroundStyle(activity.kind == .lowBattery ? Color.red : .white.opacity(0.85))
@@ -626,6 +627,19 @@ struct LiveActivityView: View {
             .foregroundStyle(.white.opacity(0.85))
     }
 
+    private func levelIndicator(_ rawLevel: Double) -> some View {
+        let level = rawLevel.isFinite ? min(max(rawLevel, 0), 1) : 0
+        let percent = Int((level * 100).rounded())
+        return HStack(spacing: 5) {
+            LevelBar(level: level)
+            Text("\(percent)")
+                .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+                .foregroundStyle(.white.opacity(0.85))
+                .contentTransition(.numericText(value: level))
+                .frame(width: 25, alignment: .trailing)
+        }
+    }
+
     private func symbol(_ name: String, tint: Color) -> some View {
         Image(systemName: name)
             .font(.system(size: 13, weight: .semibold))
@@ -633,6 +647,7 @@ struct LiveActivityView: View {
             .contentTransition(.symbolEffect(.replace))
     }
 }
+
 
 private struct SunGlyph: View {
     let level: Double
