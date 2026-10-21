@@ -1,5 +1,10 @@
 # changelog
 
+## 0.6.7.7
+
+- the pyramid head notch image is a new, more detailed sprite that stands and blinks its red eyes. art by NRM on confirmo sprites.
+- memory: about 22 mb after launch, same as 0.6.7.6 measured side by side. the download stays 2.4 mb.
+
 ## 0.6.7.6
 
 - on macs without a notch, the closed album art and idle art fit inside the island instead of clipping its round ends, and the volume and brightness bars sit centred. thanks @David4rr.
