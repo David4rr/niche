@@ -428,13 +428,16 @@ struct AgentClosedView: View {
             .font(.system(size: 12, weight: .semibold).monospacedDigit())
             .foregroundStyle(.white.opacity(0.85))
             .contentTransition(.numericText())
+        let isSmall = !LabState.hasNotch
+        let artSize: CGFloat = isSmall ? 18 : 24
+        let radius: CGFloat = isSmall ? 5 : 7
+        let offset: CGFloat = isSmall ? 0 : -2
         HStack(spacing: 0) {
             if let art {
-                IdleArtView(art: art, size: 24, cornerRadius: 7)
-                    .offset(y: -1)
+                IdleArtView(art: art, size: artSize, cornerRadius: radius)
+                    .offset(y: isSmall ? 0 : -1)
                     .padding(.leading, 5)
                     .frame(width: MusicClosedView.slot, alignment: .leading)
-                    .transition(.opacity)
                 Spacer(minLength: 0)
                 if !sessions.isEmpty {
                     HStack(spacing: 7) {
@@ -447,7 +450,7 @@ struct AgentClosedView: View {
                         count
                     }
                     .padding(.trailing, 9)
-                    .offset(y: -2)
+                    .offset(y: offset)
                     .transition(.scale(scale: 0.5).combined(with: .opacity))
                 }
             } else {
@@ -458,14 +461,14 @@ struct AgentClosedView: View {
                     }
                 }
                 .padding(.leading, 10)
-                .offset(y: -2)
+                .offset(y: offset)
                 Spacer(minLength: 0)
                 HStack(spacing: 5) {
                     StatusDot(working: working > 0)
                     count
                 }
                 .padding(.trailing, 10)
-                .offset(y: -2)
+                .offset(y: offset)
             }
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: live)
