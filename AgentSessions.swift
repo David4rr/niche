@@ -430,9 +430,9 @@ struct AgentClosedView: View {
             .contentTransition(.numericText())
         HStack(spacing: 0) {
             if let art {
-                IdleArtView(art: art, size: 24, cornerRadius: 7)
-                    .offset(y: -1)
-                    .padding(.leading, 5)
+                IdleArtView(art: art, size: LabState.closedArtSize, cornerRadius: LabState.closedArtRadius)
+                    .offset(y: LabState.closedArtOffset)
+                    .padding(.leading, LabState.closedArtLeading)
                     .frame(width: MusicClosedView.slot, alignment: .leading)
                     .transition(.opacity)
                 Spacer(minLength: 0)
@@ -447,7 +447,7 @@ struct AgentClosedView: View {
                         count
                     }
                     .padding(.trailing, 9)
-                    .offset(y: -2)
+                    .offset(y: LabState.closedOffset)
                     .transition(.scale(scale: 0.5).combined(with: .opacity))
                 }
             } else {
@@ -458,14 +458,14 @@ struct AgentClosedView: View {
                     }
                 }
                 .padding(.leading, 10)
-                .offset(y: -2)
+                .offset(y: LabState.closedOffset)
                 Spacer(minLength: 0)
                 HStack(spacing: 5) {
                     StatusDot(working: working > 0)
                     count
                 }
                 .padding(.trailing, 10)
-                .offset(y: -2)
+                .offset(y: LabState.closedOffset)
             }
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: live)
