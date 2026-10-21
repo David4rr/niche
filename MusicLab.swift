@@ -645,7 +645,7 @@ struct MusicClosedView: View {
                 ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: LabState.closedArtRadius)
                     .frame(width: LabState.closedArtSize, height: LabState.closedArtSize)
                     .offset(y: LabState.closedArtOffset)
-                    .padding(.leading, 5)
+                    .padding(.leading, LabState.closedArtLeading)
                     .frame(width: Self.slot, alignment: .leading)
                 Spacer(minLength: 0)
                 WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)

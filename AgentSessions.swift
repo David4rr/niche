@@ -432,7 +432,7 @@ struct AgentClosedView: View {
             if let art {
                 IdleArtView(art: art, size: LabState.closedArtSize, cornerRadius: LabState.closedArtRadius)
                     .offset(y: LabState.closedArtOffset)
-                    .padding(.leading, 5)
+                    .padding(.leading, LabState.closedArtLeading)
                     .frame(width: MusicClosedView.slot, alignment: .leading)
                 Spacer(minLength: 0)
                 if !sessions.isEmpty {
