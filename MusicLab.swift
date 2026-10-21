@@ -640,14 +640,11 @@ struct MusicClosedView: View {
 
     var body: some View {
         let shown = player.track ?? lastTrack
-        let isSmall = !LabState.hasNotch
-        let artSize: CGFloat = isSmall ? 18 : 24
-        let radius: CGFloat = isSmall ? 5 : 7
         HStack(spacing: 0) {
             if let track = shown {
-                ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: radius)
-                    .frame(width: artSize, height: artSize)
-                    .offset(y: isSmall ? 0 : -1)
+                ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: LabState.closedArtRadius)
+                    .frame(width: LabState.closedArtSize, height: LabState.closedArtSize)
+                    .offset(y: LabState.closedArtOffset)
                     .padding(.leading, 5)
                     .frame(width: Self.slot, alignment: .leading)
                 Spacer(minLength: 0)

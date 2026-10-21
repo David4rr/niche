@@ -428,14 +428,10 @@ struct AgentClosedView: View {
             .font(.system(size: 12, weight: .semibold).monospacedDigit())
             .foregroundStyle(.white.opacity(0.85))
             .contentTransition(.numericText())
-        let isSmall = !LabState.hasNotch
-        let artSize: CGFloat = isSmall ? 18 : 24
-        let radius: CGFloat = isSmall ? 5 : 7
-        let offset: CGFloat = isSmall ? 0 : -2
         HStack(spacing: 0) {
             if let art {
-                IdleArtView(art: art, size: artSize, cornerRadius: radius)
-                    .offset(y: isSmall ? 0 : -1)
+                IdleArtView(art: art, size: LabState.closedArtSize, cornerRadius: LabState.closedArtRadius)
+                    .offset(y: LabState.closedArtOffset)
                     .padding(.leading, 5)
                     .frame(width: MusicClosedView.slot, alignment: .leading)
                 Spacer(minLength: 0)
@@ -450,7 +446,7 @@ struct AgentClosedView: View {
                         count
                     }
                     .padding(.trailing, 9)
-                    .offset(y: offset)
+                    .offset(y: LabState.closedOffset)
                     .transition(.scale(scale: 0.5).combined(with: .opacity))
                 }
             } else {
@@ -461,14 +457,14 @@ struct AgentClosedView: View {
                     }
                 }
                 .padding(.leading, 10)
-                .offset(y: offset)
+                .offset(y: LabState.closedOffset)
                 Spacer(minLength: 0)
                 HStack(spacing: 5) {
                     StatusDot(working: working > 0)
                     count
                 }
                 .padding(.trailing, 10)
-                .offset(y: offset)
+                .offset(y: LabState.closedOffset)
             }
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: live)

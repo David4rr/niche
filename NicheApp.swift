@@ -106,6 +106,10 @@ final class LabState {
         if let realNotch { return realNotch }
         return CGSize(width: 120, height: isIsland ? 24 : NSStatusBar.system.thickness)
     }
+    static var closedArtSize: CGFloat { hasNotch ? 24 : 18 }
+    static var closedArtRadius: CGFloat { hasNotch ? 7 : 5 }
+    static var closedArtOffset: CGFloat { hasNotch ? -1 : 0 }
+    static var closedOffset: CGFloat { hasNotch ? -2 : 0 }
     static func closedSize(hasContent: Bool) -> CGSize {
         CGSize(width: hardwareNotch.width + (hasContent ? 2 * MusicClosedView.slot : 0), height: hardwareNotch.height)
     }

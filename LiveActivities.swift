@@ -541,7 +541,7 @@ struct LiveActivityView: View {
                 .frame(width: MusicClosedView.slot + room, alignment: room > 0 ? .trailing : .center)
         }
         .foregroundStyle(.white)
-        .offset(y: LabState.hasNotch ? -2 : 0)
+        .offset(y: LabState.closedOffset)
     }
 
     @ViewBuilder private var icon: some View {
