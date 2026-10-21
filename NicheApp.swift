@@ -139,7 +139,7 @@ final class LabState {
         CGSize(width: hardwareNotch.width + (hasContent ? 2 * MusicClosedView.slot : 0), height: hardwareNotch.height)
     }
     static var openSize: CGSize { CGSize(width: hardwareNotch.width + 160, height: 175) }
-    static var agentsWidth: CGFloat { openSize.width + 40 }
+    static var agentsWidth: CGFloat { max(openSize.width + 40, 385) }
 
     var hasClosedContent: Bool { shownFeature != nil || idleArt != nil || lockState != .none || liveActivities.current != nil }
 
@@ -189,9 +189,11 @@ final class LabState {
     var showsAllAgents = false
     var hasOpenableContent: Bool { player.track != nil || !agents.isEmpty || peekFeature == .clipboard }
 
+    static var activityRoomHeight: CGFloat { hardwareNotch.height + (isIsland ? 7 : 0) + 4 - 18 }
+
     var activityRoom: CGFloat {
-        controller.isExpanded && liveActivities.current != nil && openFeature != .agents && openFeature != .clipboard
-            ? Self.hardwareNotch.height + 4 - 18 : 0
+        guard controller.isExpanded, liveActivities.current != nil, openFeature != .clipboard else { return 0 }
+        return openFeature == .agents && agents.usage.accounts.isEmpty ? 0 : Self.activityRoomHeight
     }
 
     var volumeRoom: CGFloat {
@@ -199,18 +201,18 @@ final class LabState {
             && player.track != nil && player.output.isShowingVolume ? 32 : 0
     }
 
-    var agentsHeight: CGFloat { agentsHeight(showingAll: showsAllAgents) }
+    var agentsHeight: CGFloat { agentsHeight(showingAll: showsAllAgents, room: activityRoom) }
 
-    func agentsHeight(showingAll: Bool) -> CGFloat {
+    func agentsHeight(showingAll: Bool, room: CGFloat) -> CGFloat {
         let count = agents.sessions.count
         let rows = showingAll ? count : min(count, AgentSessionList.visibleRows)
         let more = count > AgentSessionList.visibleRows ? AgentSessionList.spacing + AgentSessionList.moreHeight : 0
         let list = CGFloat(rows) * AgentSessionList.rowHeight + CGFloat(max(rows - 1, 0)) * AgentSessionList.spacing + more
         if agents.usage.accounts.isEmpty { return Self.hardwareNotch.height + 2 + list + 16 }
-        return 18 + UsageStrip.height + 12 + list + 16
+        return 18 + room + UsageStrip.height + 12 + list + 16
     }
 
-    var panelHeight: CGFloat { max(Self.openSize.height, agents.isEmpty ? 0 : agentsHeight(showingAll: true)) + 60 }
+    var panelHeight: CGFloat { max(Self.openSize.height, agents.isEmpty ? 0 : agentsHeight(showingAll: true, room: Self.activityRoomHeight)) + 60 }
 
     var currentSize: CGSize {
         if controller.isExpanded && openFeature == .agents {
@@ -425,7 +427,7 @@ struct NicheView: View {
                             if lab.openFeature == .agents {
                                 VStack(spacing: 12) {
                                     if !lab.agents.usage.accounts.isEmpty {
-                                        UsageStrip(accounts: lab.agents.usage.accounts)
+                                        UsageStrip(accounts: lab.agents.usage.accounts, room: lab.activityRoom)
                                     }
                                     AgentSessionList(sessions: lab.agents.sessions, showsAll: lab.showsAllAgents, onToggleAll: {
                                         withAnimation(.spring(Spring(duration: 0.4, bounce: 0.2), blendDuration: 0)) { lab.showsAllAgents.toggle() }
@@ -436,7 +438,7 @@ struct NicheView: View {
                                 }
                                     .frame(width: (lab.agents.usage.accounts.isEmpty ? LabState.openSize.width : LabState.agentsWidth) - 2 * 18,
                                            alignment: .top)
-                                    .padding(.top, lab.agents.usage.accounts.isEmpty ? LabState.hardwareNotch.height + 2 : 18)
+                                    .padding(.top, lab.agents.usage.accounts.isEmpty ? LabState.hardwareNotch.height + 2 : 18 + lab.activityRoom)
                             } else if lab.openFeature == .clipboard {
                                 ClipboardView(history: lab.clipboard) { lab.pick($0) }
                                     .frame(width: LabState.openSize.width - 2 * 18,
@@ -837,7 +839,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static func panelFrame(height: CGFloat) -> NSRect {
         let screen = NotchScreen.shared.screen.frame
-        let width = LabState.openSize.width + 80
+        let width = max(LabState.openSize.width + 80, LabState.agentsWidth + 40)
         return NSRect(x: screen.midX - width / 2, y: screen.maxY - height, width: width, height: height)
     }
 

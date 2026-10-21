@@ -133,6 +133,7 @@ final class AgentUsage {
 
 struct UsageStrip: View {
     let accounts: [UsageAccount]
+    let room: CGFloat
     @State private var hovered: String?
 
     static let height: CGFloat = 56 + 12 + 24
@@ -201,7 +202,7 @@ struct UsageStrip: View {
                 }
                 .frame(height: 16)
             }
-            .padding(.top, max(LabState.hardwareNotch.height + 2 - 18, 0))
+            .padding(.top, max(LabState.hardwareNotch.height + 2 - 18 - room, 0))
             .frame(maxHeight: .infinity, alignment: .top)
             Spacer(minLength: 0)
         }

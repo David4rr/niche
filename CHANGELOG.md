@@ -1,5 +1,11 @@
 # changelog
 
+## 0.6.7.9
+
+- the agents view makes room when a live activity shows, like airpods, volume or battery, so the usage ring no longer runs into it. it slides down and back the same way music does.
+- on macs without a notch, the activity row in the island gets its full space, and the agents view is as wide as on a notched mac, so session titles stop cutting off early.
+- memory: about 21 mb after launch, same as 0.6.7.8 measured side by side. the download stays 2.4 mb.
+
 ## 0.6.7.8
 
 - the agents view no longer gets cut off at the bottom when you have more than four sessions or show them all. the notch window is sized for the full list up front, so opening stays smooth.
