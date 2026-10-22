@@ -1,5 +1,13 @@
 # changelog
 
+## 0.6.8
+
+- drag a file, image, link or text onto the notch to copy it. the notch opens a drop zone while you hold it there, and the copy lands in your clipboard history.
+- volume and brightness show their value next to the bar, and the digits roll as it changes. muted reads off.
+- the border of the open notch keeps up with the black shape while it grows, so the black no longer spills past it.
+- dragging a window under the notch no longer opens it.
+- memory: about 22 mb after launch, same as 0.6.7.10 measured side by side. the download stays 2.4 mb.
+
 ## 0.6.7.10
 
 - the open notch fits macs with a taller notch, like the 13 inch macbook air or a scaled display. the song title no longer hides under the notch.
