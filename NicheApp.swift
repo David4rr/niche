@@ -138,7 +138,8 @@ final class LabState {
     static func closedSize(hasContent: Bool) -> CGSize {
         CGSize(width: hardwareNotch.width + (hasContent ? 2 * MusicClosedView.slot : 0), height: hardwareNotch.height)
     }
-    static var openSize: CGSize { CGSize(width: hardwareNotch.width + 160, height: 175) }
+    static var notchExtra: CGFloat { max(0, hardwareNotch.height - 32) }
+    static var openSize: CGSize { CGSize(width: hardwareNotch.width + 160, height: 175 + notchExtra) }
     static var agentsWidth: CGFloat { max(openSize.width + 40, 385) }
 
     var hasClosedContent: Bool { shownFeature != nil || idleArt != nil || lockState != .none || liveActivities.current != nil }
@@ -209,7 +210,7 @@ final class LabState {
         let more = count > AgentSessionList.visibleRows ? AgentSessionList.spacing + AgentSessionList.moreHeight : 0
         let list = CGFloat(rows) * AgentSessionList.rowHeight + CGFloat(max(rows - 1, 0)) * AgentSessionList.spacing + more
         if agents.usage.accounts.isEmpty { return Self.hardwareNotch.height + 2 + list + 16 }
-        return 18 + room + UsageStrip.height + 12 + list + 16
+        return 18 + Self.notchExtra + room + UsageStrip.height + 12 + list + 16
     }
 
     var panelHeight: CGFloat { max(Self.openSize.height, agents.isEmpty ? 0 : agentsHeight(showingAll: true, room: Self.activityRoomHeight)) + 60 }
@@ -438,7 +439,7 @@ struct NicheView: View {
                                 }
                                     .frame(width: (lab.agents.usage.accounts.isEmpty ? LabState.openSize.width : LabState.agentsWidth) - 2 * 18,
                                            alignment: .top)
-                                    .padding(.top, lab.agents.usage.accounts.isEmpty ? LabState.hardwareNotch.height + 2 : 18 + lab.activityRoom)
+                                    .padding(.top, lab.agents.usage.accounts.isEmpty ? LabState.hardwareNotch.height + 2 : 18 + LabState.notchExtra + lab.activityRoom)
                             } else if lab.openFeature == .clipboard {
                                 ClipboardView(history: lab.clipboard) { lab.pick($0) }
                                     .frame(width: LabState.openSize.width - 2 * 18,
@@ -446,7 +447,7 @@ struct NicheView: View {
                                     .padding(.top, LabState.hardwareNotch.height + 4)
                             } else {
                                 MusicExpandedView(player: lab.player, width: LabState.openSize.width - 2 * 18)
-                                    .padding(.top, 18 + lab.activityRoom)
+                                    .padding(.top, 18 + LabState.notchExtra + lab.activityRoom)
                             }
                         }
                         .id(lab.openFeature)
@@ -505,7 +506,7 @@ struct NicheView: View {
             }
             .modifier(NotchSquashModifier(controller: c))
             .offset(x: lab.closedOffset)
-            .animation(closedResize, value: lab.closedOffset)
+            .animation(c.isCollapsing ? .spring(response: 0.38, dampingFraction: 0.95) : closedResize, value: lab.closedOffset)
             .padding(.top, LabState.topGap)
             .contentShape(Rectangle())
             .onHover { lab.hover($0) }
