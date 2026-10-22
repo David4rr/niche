@@ -1,5 +1,11 @@
 # changelog
 
+## 0.6.8.1
+
+- the notch follows music and spotify only. videos in a browser no longer take it over. turn on "show browsers and other players" in settings → music to bring them back.
+- wide cover art, like a video thumbnail, is cropped to a square instead of spilling over the title.
+- memory: about 24 mb after launch, in the same range as 0.6.8 measured side by side. the download stays 2.4 mb.
+
 ## 0.6.8
 
 - drag a file, image, link or text onto the notch to copy it. the notch opens a drop zone while you hold it there, and the copy lands in your clipboard history.
