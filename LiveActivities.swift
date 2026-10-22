@@ -521,9 +521,12 @@ final class LiveActivityCenter {
 struct LiveActivityView: View {
     let activity: LiveActivityCenter.Activity
 
+    static let valueWidth: CGFloat = 22
+
     static func room(for activity: LiveActivityCenter.Activity) -> CGFloat {
         switch activity.kind {
-        case .volume, .brightness, .lowBattery, .charging, .fullyCharged: 12
+        case .volume, .brightness: LevelBar.width + 5 + valueWidth + 11 - MusicClosedView.slot
+        case .lowBattery, .charging, .fullyCharged: 12
         case .headphonesBattery: 16
         case .headphones: activity.isOn && activity.level > 0 ? 16 : 0
         default: 0
@@ -578,7 +581,19 @@ struct LiveActivityView: View {
         case .capsLock, .focus:
             label(activity.isOn ? "On" : "Off")
         case .volume, .brightness:
-            LevelBar(level: activity.kind == .volume && !activity.isOn ? 0 : activity.level)
+            let muted = activity.kind == .volume && !activity.isOn
+            HStack(spacing: 5) {
+                LevelBar(level: muted ? 0 : activity.level)
+                Group {
+                    if muted {
+                        label("Off").foregroundStyle(.white.opacity(0.5))
+                    } else {
+                        label("\(Int((activity.level * 100).rounded()))")
+                            .contentTransition(.numericText(value: activity.level))
+                    }
+                }
+                .frame(width: Self.valueWidth, alignment: .trailing)
+            }
         case .lowBattery, .charging, .fullyCharged:
             label("\(Int((activity.level * 100).rounded()))%")
                 .foregroundStyle(activity.kind == .lowBattery ? Color.red : .white.opacity(0.85))
@@ -656,15 +671,16 @@ private struct SunGlyph: View {
 }
 
 private struct LevelBar: View {
+    static let width: CGFloat = 34
     let level: Double
 
     var body: some View {
         Capsule().fill(.white.opacity(0.2))
             .overlay(alignment: .leading) {
                 Capsule().fill(.white)
-                    .frame(width: 34 * min(max(level, 0), 1))
+                    .frame(width: Self.width * min(max(level, 0), 1))
             }
-            .frame(width: 34, height: 5)
+            .frame(width: Self.width, height: 5)
             .animation(.smooth(duration: 0.25), value: level)
     }
 }
