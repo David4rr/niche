@@ -521,9 +521,11 @@ final class LiveActivityCenter {
 struct LiveActivityView: View {
     let activity: LiveActivityCenter.Activity
 
+    static let valueWidth: CGFloat = 22
+
     static func room(for activity: LiveActivityCenter.Activity) -> CGFloat {
         switch activity.kind {
-        case .volume, .brightness: 40
+        case .volume, .brightness: LevelBar.width + 5 + valueWidth + 11 - MusicClosedView.slot
         case .lowBattery, .charging, .fullyCharged: 12
         case .headphonesBattery: 16
         case .headphones: activity.isOn && activity.level > 0 ? 16 : 0
@@ -579,7 +581,19 @@ struct LiveActivityView: View {
         case .capsLock, .focus:
             label(activity.isOn ? "On" : "Off")
         case .volume, .brightness:
-            levelIndicator(activity.kind == .volume && !activity.isOn ? 0 : activity.level)
+            let muted = activity.kind == .volume && !activity.isOn
+            HStack(spacing: 5) {
+                LevelBar(level: muted ? 0 : activity.level)
+                Group {
+                    if muted {
+                        label("Off").foregroundStyle(.white.opacity(0.5))
+                    } else {
+                        label("\(Int((activity.level * 100).rounded()))")
+                            .contentTransition(.numericText(value: activity.level))
+                    }
+                }
+                .frame(width: Self.valueWidth, alignment: .trailing)
+            }
         case .lowBattery, .charging, .fullyCharged:
             label("\(Int((activity.level * 100).rounded()))%")
                 .foregroundStyle(activity.kind == .lowBattery ? Color.red : .white.opacity(0.85))
@@ -627,19 +641,6 @@ struct LiveActivityView: View {
             .foregroundStyle(.white.opacity(0.85))
     }
 
-    private func levelIndicator(_ rawLevel: Double) -> some View {
-        let level = rawLevel.isFinite ? min(max(rawLevel, 0), 1) : 0
-        let percent = Int((level * 100).rounded())
-        return HStack(spacing: 5) {
-            LevelBar(level: level)
-            Text("\(percent)")
-                .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
-                .foregroundStyle(.white.opacity(0.85))
-                .contentTransition(.numericText(value: level))
-                .frame(width: 25, alignment: .trailing)
-        }
-    }
-
     private func symbol(_ name: String, tint: Color) -> some View {
         Image(systemName: name)
             .font(.system(size: 13, weight: .semibold))
@@ -647,7 +648,6 @@ struct LiveActivityView: View {
             .contentTransition(.symbolEffect(.replace))
     }
 }
-
 
 private struct SunGlyph: View {
     let level: Double
@@ -671,15 +671,16 @@ private struct SunGlyph: View {
 }
 
 private struct LevelBar: View {
+    static let width: CGFloat = 34
     let level: Double
 
     var body: some View {
         Capsule().fill(.white.opacity(0.2))
             .overlay(alignment: .leading) {
                 Capsule().fill(.white)
-                    .frame(width: 34 * min(max(level, 0), 1))
+                    .frame(width: Self.width * min(max(level, 0), 1))
             }
-            .frame(width: 34, height: 5)
+            .frame(width: Self.width, height: 5)
             .animation(.smooth(duration: 0.25), value: level)
     }
 }
