@@ -126,6 +126,22 @@ final class ClipboardHistory {
         return nil
     }
 
+    func take(_ board: NSPasteboard) -> Bool {
+        guard isOn, let items = board.pasteboardItems, !items.isEmpty else { return false }
+        let copies = items.map { item in
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) { copy.setData(data, forType: type) }
+            }
+            return copy
+        }
+        let general = NSPasteboard.general
+        general.clearContents()
+        general.writeObjects(copies)
+        poll()
+        return true
+    }
+
     private func insert(_ item: Item) {
         withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
             items.removeAll { $0.signature == item.signature }
@@ -187,6 +203,57 @@ final class ClipboardHistory {
         if hex.count == 3 { hex = hex.map { "\($0)\($0)" }.joined() }
         guard let value = UInt32(hex, radix: 16) else { return nil }
         return Color(red: Double((value >> 16) & 0xff) / 255, green: Double((value >> 8) & 0xff) / 255, blue: Double(value & 0xff) / 255)
+    }
+}
+
+struct ClipboardDropZone: View {
+    static let height: CGFloat = 40
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "tray.and.arrow.down.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color(red: 0.45, green: 0.85, blue: 0.8))
+                .symbolEffect(.bounce.down, options: .repeat(.periodic(delay: 0.5)))
+            Text("Drop to copy")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.85))
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 26)
+        .background(RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+        .padding(.horizontal, 12)
+    }
+}
+
+final class DropCatcherView: NSView {
+    private let lab: LabState
+
+    init(lab: LabState) {
+        self.lab = lab
+        super.init(frame: .zero)
+        registerForDraggedTypes([.fileURL, .URL, .string, .png, .tiff])
+    }
+
+    required init?(coder: NSCoder) { fatalError("use init(lab:)") }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard lab.canDrop else { return [] }
+        lab.setDropTarget(true)
+        return .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        lab.canDrop ? .copy : []
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        lab.setDropTarget(false)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        lab.setDropTarget(false)
+        return lab.clipboard.take(sender.draggingPasteboard)
     }
 }
 

@@ -62,6 +62,7 @@ final class LabState {
     enum LockState { case none, locked, unlocking }
     private(set) var lockState = LockState.none
     private(set) var lockShown = false
+    private(set) var isDropTarget = false
 
     let controller = NotchController()
     let player = MusicPlayer()
@@ -141,6 +142,7 @@ final class LabState {
     static var notchExtra: CGFloat { max(0, hardwareNotch.height - 32) }
     static var openSize: CGSize { CGSize(width: hardwareNotch.width + 160, height: 175 + notchExtra) }
     static var agentsWidth: CGFloat { max(openSize.width + 40, 385) }
+    static var dropSize: CGSize { CGSize(width: closedSize(hasContent: true).width + 40, height: hardwareNotch.height + ClipboardDropZone.height) }
 
     var hasClosedContent: Bool { shownFeature != nil || idleArt != nil || lockState != .none || liveActivities.current != nil }
 
@@ -222,13 +224,14 @@ final class LabState {
         if controller.isExpanded {
             return CGSize(width: Self.openSize.width, height: Self.openSize.height + activityRoom + volumeRoom)
         }
+        if isDropTarget { return Self.dropSize }
         let size = Self.closedSize(hasContent: hasClosedContent)
         let room = closedRoom
         return CGSize(width: size.width + room.left + room.right + levelRoom, height: size.height)
     }
 
     var closedRoom: (left: CGFloat, right: CGFloat) {
-        guard !controller.isExpanded, lockState == .none, liveActivities.current == nil else { return (0, 0) }
+        guard !controller.isExpanded, !isDropTarget, lockState == .none, liveActivities.current == nil else { return (0, 0) }
         if shownFeature == nil { return idleArt != nil ? (-5, -MusicClosedView.slot) : (0, 0) }
         guard shownFeature == .agents else { return (0, 0) }
         let kinds = AgentKind.allCases.filter { !agents.sessions(of: $0).isEmpty }.count
@@ -237,7 +240,7 @@ final class LabState {
     }
 
     var levelRoom: CGFloat {
-        guard !controller.isExpanded, lockState == .none, let activity = liveActivities.current else { return 0 }
+        guard !controller.isExpanded, !isDropTarget, lockState == .none, let activity = liveActivities.current else { return 0 }
         return LiveActivityView.room(for: activity)
     }
 
@@ -345,11 +348,21 @@ final class LabState {
     }
 
     func hover(_ inside: Bool) {
+        if isDropTarget || (inside && !controller.isExpanded && NSEvent.pressedMouseButtons != 0) { return }
         if !hasOpenableContent && lockState == .none && !controller.isExpanded {
             if inside { pulse() }
             return
         }
         setOpen(inside && lockState == .none)
+    }
+
+    var canDrop: Bool { clipboard.isOn && lockState == .none }
+
+    func setDropTarget(_ on: Bool) {
+        guard on != isDropTarget else { return }
+        withAnimation(on ? .spring(Spring(duration: 0.5, bounce: 0.32), blendDuration: 0) : .spring(response: 0.45, dampingFraction: 0.95)) {
+            isDropTarget = on
+        }
     }
 
     private func pulse() {
@@ -414,7 +427,7 @@ struct NicheView: View {
         let c = lab.controller
         let size = lab.currentSize
         let island = lab.notchStyle == .island && !LabState.hasNotch
-        let radii = c.isRounded ? (top: 16.0, bottom: 22.0) : (top: 8.0, bottom: island ? size.height / 2 : 12.0)
+        let radii = c.isRounded || lab.isDropTarget ? (top: 16.0, bottom: 22.0) : (top: 8.0, bottom: island ? size.height / 2 : 12.0)
         let outlineWidth = size.width + 2 * radii.top
         let shape = NotchShape(topCornerRadius: radii.top, bottomCornerRadius: radii.bottom, isIsland: island)
 
@@ -463,6 +476,12 @@ struct NicheView: View {
                         .blur(radius: c.isSharp ? 0 : 5)
                         .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.12)),
                                                 removal: .opacity.animation(.easeOut(duration: 0.1))))
+                } else if lab.isDropTarget {
+                    ClipboardDropZone()
+                        .padding(.top, LabState.hardwareNotch.height)
+                        .frame(width: size.width, height: size.height, alignment: .top)
+                        .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.12)),
+                                                removal: .opacity.animation(.easeOut(duration: 0.1))))
                 } else if lab.lockState != .none {
                     LockIndicator(state: lab.lockState, isShown: lab.lockShown)
                         .frame(width: LabState.closedSize(hasContent: true).width, height: LabState.hardwareNotch.height)
@@ -492,8 +511,7 @@ struct NicheView: View {
                                                    .init(color: .white.opacity(0), location: 0.75)],
                                            startPoint: .bottom, endPoint: .top),
                             lineWidth: 2)
-                    .opacity(c.isExpanded ? 1 : 0)
-                    .animation(.easeOut(duration: 0.35), value: c.isExpanded)
+                    .animation(.easeOut(duration: 0.35)) { $0.opacity(c.isExpanded || lab.isDropTarget ? 1 : 0) }
                     .allowsHitTesting(false)
             }
             .frame(width: outlineWidth, height: size.height, alignment: .top)
@@ -501,8 +519,7 @@ struct NicheView: View {
             .background {
                 shape
                     .fill(.black)
-                    .shadow(color: .black.opacity(c.isExpanded ? 0.55 : 0), radius: 14, y: 4)
-                    .animation(.easeOut(duration: 0.35), value: c.isExpanded)
+                    .animation(.easeOut(duration: 0.35)) { $0.shadow(color: .black.opacity(c.isExpanded || lab.isDropTarget ? 0.55 : 0), radius: 14, y: 4) }
             }
             .modifier(NotchSquashModifier(controller: c))
             .offset(x: lab.closedOffset)
@@ -742,6 +759,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var monitors: [Any] = []
     private var playbackTimer: Timer?
     private var shrinkTask: Task<Void, Never>?
+    private var dropCatcher: NSPanel!
     private var signalSources: [DispatchSourceSignal] = []
 
     static func main() {
@@ -764,6 +782,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.canBecomeVisibleWithoutLogin = true
         panel.contentView = NSHostingView(rootView: NicheView(lab: lab))
         panel.orderFrontRegardless()
+
+        dropCatcher = NSPanel(contentRect: Self.dropFrame(), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        dropCatcher.isOpaque = false
+        dropCatcher.backgroundColor = .clear
+        dropCatcher.hasShadow = false
+        dropCatcher.level = .statusBar
+        dropCatcher.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        dropCatcher.ignoresMouseEvents = true
+        dropCatcher.contentView = DropCatcherView(lab: lab)
+        dropCatcher.orderFrontRegardless()
 
         let cid = CGSDefaultConnection()
         notchSpace = CGSSpaceCreate(cid, 0x1, nil)
@@ -811,7 +839,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in self?.lab.player.tick() }
         }
 
-        let update: (NSEvent) -> Void = { [weak self] _ in
+        let update: (NSEvent) -> Void = { [weak self] event in
             guard let self else { return }
             let notch = self.lab.currentSize
             let gap = LabState.topGap
@@ -819,9 +847,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let hit = NSRect(x: panelFrame.midX + self.lab.closedOffset - notch.width / 2 - 8, y: panelFrame.maxY - gap - notch.height - 8,
                              width: notch.width + 16, height: gap + notch.height + 8)
             self.panel.ignoresMouseEvents = !hit.contains(NSEvent.mouseLocation)
+            self.dropCatcher.ignoresMouseEvents = event.type != .leftMouseDragged
         }
-        monitors.append(NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved, handler: update) as Any)
-        monitors.append(NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { update($0); return $0 } as Any)
+        monitors.append(NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: update) as Any)
+        monitors.append(NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { update($0); return $0 } as Any)
 
         monitors.append(NSEvent.addLocalMonitorForEvents(matching: .rightMouseDown) { [weak self] event in
             guard let self, event.window === self.panel, let view = self.panel.contentView else { return event }
@@ -847,6 +876,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func screenChanged() {
         NotchScreen.shared.refresh()
         panel.setFrame(Self.panelFrame(height: lab.panelHeight), display: true)
+        dropCatcher.setFrame(Self.dropFrame(), display: false)
+    }
+
+    private static func dropFrame() -> NSRect {
+        let screen = NotchScreen.shared.screen.frame
+        let size = LabState.dropSize
+        return NSRect(x: screen.midX - size.width / 2, y: screen.maxY - LabState.topGap - size.height,
+                      width: size.width, height: LabState.topGap + size.height)
     }
 
     private func trackPanelHeight() {
