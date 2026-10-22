@@ -25,6 +25,12 @@ final class MusicPlayer {
     private(set) var isShuffled = false
     private(set) var position: Double = 0
     private(set) var songChangeToken = 0
+    var allowsAnyApp: Bool {
+        didSet {
+            UserDefaults.standard.set(allowsAnyApp, forKey: "musicAnyApp")
+            if let lastSnapshot { apply(lastSnapshot) }
+        }
+    }
     let spectrum = AudioSpectrum()
     let output = OutputDevice()
 
@@ -35,12 +41,17 @@ final class MusicPlayer {
     @ObservationIgnored private var lastSong: Track?
     @ObservationIgnored private var pendingDeadline: Task<Void, Never>?
     @ObservationIgnored private var clearTask: Task<Void, Never>?
+    @ObservationIgnored private var lastSnapshot: NowPlayingSnapshot?
     @ObservationIgnored private var process: Process?
     @ObservationIgnored private let send: @convention(c) (Int, AnyObject?) -> Bool
     @ObservationIgnored private let setElapsed: @convention(c) (Double) -> Void
     @ObservationIgnored private let setShuffle: @convention(c) (Int) -> Void
 
+    private static let musicApps: Set<String> = ["com.apple.Music", "com.spotify.client"]
+
     init() {
+        UserDefaults.standard.register(defaults: ["musicAnyApp": false])
+        allowsAnyApp = UserDefaults.standard.bool(forKey: "musicAnyApp")
         guard let handle = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_NOW),
               let send = dlsym(handle, "MRMediaRemoteSendCommand"),
               let setElapsed = dlsym(handle, "MRMediaRemoteSetElapsedTime"),
@@ -85,7 +96,8 @@ final class MusicPlayer {
     }
 
     private func apply(_ snapshot: NowPlayingSnapshot) {
-        guard let next = snapshot.track else {
+        lastSnapshot = snapshot
+        guard let next = snapshot.track, allowsAnyApp || snapshot.app.map(Self.musicApps.contains) == true else {
             guard track != nil, clearTask == nil else { return }
             clearTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(1.5))
@@ -182,18 +194,13 @@ private struct NowPlayingSnapshot: @unchecked Sendable {
     let rate: Double
     let shuffleMode: Int?
     let pid: pid_t?
+    let app: String?
 
     nonisolated(unsafe) private static let iso: ISO8601DateFormatter = ISO8601DateFormatter()
     nonisolated(unsafe) private static var cachedArtwork: (key: String, image: NSImage?) = ("", nil)
 
-    private static let browsers: Set<String> = {
-        guard let web = URL(string: "https://example.com") else { return [] }
-        return Set(NSWorkspace.shared.urlsForApplications(toOpen: web).compactMap { Bundle(url: $0)?.bundleIdentifier })
-    }()
-
     init(_ p: [String: Any]) {
-        let isBrowser = (p["bundleIdentifier"] as? String).map { Self.browsers.contains($0) } ?? false
-        if !isBrowser, let title = p["title"] as? String, !title.isEmpty {
+        if let title = p["title"] as? String, !title.isEmpty {
             let art = p["artworkData"] as? String
             let key = art.map { "\($0.count):\($0.suffix(32))" } ?? ""
             if key != Self.cachedArtwork.key {
@@ -214,13 +221,16 @@ private struct NowPlayingSnapshot: @unchecked Sendable {
         rate = p["playbackRate"] as? Double ?? 1
         shuffleMode = p["shuffleMode"] as? Int
         pid = (p["processIdentifier"] as? Int).map { pid_t($0) }
+        app = p["parentApplicationBundleIdentifier"] as? String ?? p["bundleIdentifier"] as? String
     }
 
     private static func thumbnail(_ data: Data) -> NSImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = props[kCGImagePropertyPixelWidth] as? Int, let height = props[kCGImagePropertyPixelHeight] as? Int,
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                   kCGImageSourceCreateThumbnailFromImageAlways: true,
-                  kCGImageSourceThumbnailMaxPixelSize: 128,
+                  kCGImageSourceThumbnailMaxPixelSize: 128 * max(width, height) / max(min(width, height), 1),
                   kCGImageSourceShouldCacheImmediately: true,
               ] as CFDictionary) else { return nil }
         return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
@@ -232,7 +242,9 @@ struct ArtworkTile: View {
 
     var body: some View {
         if let artwork = track.artwork {
-            Image(nsImage: artwork).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
+            Color.clear.overlay {
+                Image(nsImage: artwork).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
+            }
         } else {
             Color(white: 0.22).overlay {
                 Image(systemName: "music.note").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white.opacity(0.7))

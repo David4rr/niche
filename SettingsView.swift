@@ -145,10 +145,18 @@ struct SettingsView: View {
     }
 
     private var music: some View {
-        Section {
-            Toggle("Live visualizer", isOn: $lab.liveVisualizer)
-        } footer: {
-            Text("Live bars follow the playing app's audio. Capturing it makes macOS show its purple recording indicator; with this off the bars move on their own and nothing is captured.")
+        let player = lab.player
+        return Group {
+            Section {
+                Toggle("Show browsers and other players", isOn: Binding(get: { player.allowsAnyApp }, set: { player.allowsAnyApp = $0 }))
+            } footer: {
+                Text("Off, the notch only follows Music and Spotify. On, it also shows videos playing in a browser and any other app that reports what it plays.")
+            }
+            Section {
+                Toggle("Live visualizer", isOn: $lab.liveVisualizer)
+            } footer: {
+                Text("Live bars follow the playing app's audio. Capturing it makes macOS show its purple recording indicator; with this off the bars move on their own and nothing is captured.")
+            }
         }
     }
 
