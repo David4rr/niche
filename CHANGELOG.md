@@ -1,5 +1,11 @@
 # changelog
 
+## 0.6.7.10
+
+- the open notch fits macs with a taller notch, like the 13 inch macbook air or a scaled display. the song title no longer hides under the notch.
+- closing the notch with the idle image and agents showing no longer bounces the edge into the image.
+- memory: about 23 mb after launch, same as 0.6.7.9 measured side by side. the download stays 2.4 mb.
+
 ## 0.6.7.9
 
 - the agents view makes room when a live activity shows, like airpods, volume or battery, so the usage ring no longer runs into it. it slides down and back the same way music does.
