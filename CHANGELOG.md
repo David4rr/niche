@@ -1,5 +1,10 @@
 # changelog
 
+## 0.6.8.2
+
+- volume and brightness at 100 stay on one line instead of wrapping. thanks @David4rr.
+- memory: about 24 mb after launch, same as 0.6.8.1. the download stays 2.4 mb.
+
 ## 0.6.8.1
 
 - the notch follows music and spotify only. videos in a browser no longer take it over. turn on "show browsers and other players" in settings → music to bring them back.
