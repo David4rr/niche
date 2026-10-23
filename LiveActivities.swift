@@ -521,7 +521,7 @@ final class LiveActivityCenter {
 struct LiveActivityView: View {
     let activity: LiveActivityCenter.Activity
 
-    static let valueWidth: CGFloat = 22
+    static let valueWidth: CGFloat = 24
 
     static func room(for activity: LiveActivityCenter.Activity) -> CGFloat {
         switch activity.kind {
@@ -592,6 +592,7 @@ struct LiveActivityView: View {
                             .contentTransition(.numericText(value: activity.level))
                     }
                 }
+                .fixedSize()
                 .frame(width: Self.valueWidth, alignment: .trailing)
             }
         case .lowBattery, .charging, .fullyCharged:
