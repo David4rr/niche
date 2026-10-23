@@ -80,6 +80,11 @@ struct SettingsView: View {
             } footer: {
                 Text("Right-click the notch to open these settings when the menu bar icon is hidden.")
             }
+            Section {
+                Toggle("Hide in full screen", isOn: $lab.hideInFullscreen)
+            } footer: {
+                Text("The notch steps aside while an app is in full screen, like a video or a game, and comes back when you leave it.")
+            }
             if !LabState.hasNotch {
                 Section {
                     Picker("Notch style", selection: $lab.notchStyle) {

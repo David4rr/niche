@@ -55,6 +55,9 @@ final class LabState {
     var showLockIndicator: Bool {
         didSet { UserDefaults.standard.set(showLockIndicator, forKey: "showLockIndicator") }
     }
+    var hideInFullscreen: Bool {
+        didSet { UserDefaults.standard.set(hideInFullscreen, forKey: "hideInFullscreen") }
+    }
     enum NotchStyle: String { case island, notch }
     var notchStyle: NotchStyle {
         didSet { UserDefaults.standard.set(notchStyle.rawValue, forKey: "notchStyle"); Self.style = notchStyle }
@@ -81,13 +84,14 @@ final class LabState {
     init() {
         let defaults = UserDefaults.standard
         defaults.register(defaults: ["showInMenuBar": true, "liveVisualizer": false, "showAgents": true,
-                                     "showClaude": true, "showOmp": true, "showLockIndicator": true, "notchStyle": "island"])
+                                     "showClaude": true, "showOmp": true, "showLockIndicator": true, "hideInFullscreen": false, "notchStyle": "island"])
         self.showInMenuBar = defaults.bool(forKey: "showInMenuBar")
         self.liveVisualizer = defaults.bool(forKey: "liveVisualizer")
         self.showAgents = defaults.bool(forKey: "showAgents")
         self.showClaude = defaults.bool(forKey: "showClaude")
         self.showOmp = defaults.bool(forKey: "showOmp")
         self.showLockIndicator = defaults.bool(forKey: "showLockIndicator")
+        self.hideInFullscreen = defaults.bool(forKey: "hideInFullscreen")
         self.notchStyle = NotchStyle(rawValue: defaults.string(forKey: "notchStyle")!)!
         Self.style = notchStyle
         player.spectrum.isEnabled = liveVisualizer
@@ -744,6 +748,8 @@ private struct Shackle: Shape {
 @_silgen_name("CGSShowSpaces") private func CGSShowSpaces(_ cid: UInt, _ spaces: NSArray)
 @_silgen_name("CGSHideSpaces") private func CGSHideSpaces(_ cid: UInt, _ spaces: NSArray)
 @_silgen_name("CGSSpaceDestroy") private func CGSSpaceDestroy(_ cid: UInt, _ space: UInt64)
+@_silgen_name("CGSManagedDisplayGetCurrentSpace") private func CGSManagedDisplayGetCurrentSpace(_ cid: UInt, _ display: CFString) -> UInt64
+@_silgen_name("CGSSpaceGetType") private func CGSSpaceGetType(_ cid: UInt, _ space: UInt64) -> Int
 @_silgen_name("CGSAddWindowsToSpaces") private func CGSAddWindowsToSpaces(_ cid: UInt, _ windows: NSArray, _ spaces: NSArray)
 
 @main
@@ -761,6 +767,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shrinkTask: Task<Void, Never>?
     private var dropCatcher: NSPanel!
     private var signalSources: [DispatchSourceSignal] = []
+    private var isHidden = false
 
     static func main() {
         let app = NSApplication.shared
@@ -846,8 +853,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let panelFrame = self.panel.frame
             let hit = NSRect(x: panelFrame.midX + self.lab.closedOffset - notch.width / 2 - 8, y: panelFrame.maxY - gap - notch.height - 8,
                              width: notch.width + 16, height: gap + notch.height + 8)
-            self.panel.ignoresMouseEvents = !hit.contains(NSEvent.mouseLocation)
-            self.dropCatcher.ignoresMouseEvents = event.type != .leftMouseDragged
+            self.panel.ignoresMouseEvents = self.isHidden || !hit.contains(NSEvent.mouseLocation)
+            self.dropCatcher.ignoresMouseEvents = self.isHidden || event.type != .leftMouseDragged
         }
         monitors.append(NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: update) as Any)
         monitors.append(NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { update($0); return $0 } as Any)
@@ -863,6 +870,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         monitors.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.screenChanged() }
         })
+        monitors.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.applyFullscreen() }
+        })
+        applyFullscreen()
 
         if !UserDefaults.standard.bool(forKey: "onboarded") { openOnboarding() }
     }
@@ -877,6 +888,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotchScreen.shared.refresh()
         panel.setFrame(Self.panelFrame(height: lab.panelHeight), display: true)
         dropCatcher.setFrame(Self.dropFrame(), display: false)
+        applyFullscreen()
+    }
+
+    private func applyFullscreen() {
+        let hide = lab.hideInFullscreen && Self.screenIsFullscreen()
+        guard hide != isHidden else { return }
+        isHidden = hide
+        let cid = CGSDefaultConnection()
+        if hide {
+            lab.setOpen(false)
+            panel.ignoresMouseEvents = true
+            CGSHideSpaces(cid, [notchSpace] as NSArray)
+        } else {
+            CGSShowSpaces(cid, [notchSpace] as NSArray)
+        }
+    }
+
+    private static func screenIsFullscreen() -> Bool {
+        let screen = NotchScreen.shared.screen
+        let display = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as! CGDirectDisplayID
+        let uuid = CFUUIDCreateString(nil, CGDisplayCreateUUIDFromDisplayID(display).takeRetainedValue())!
+        let cid = CGSDefaultConnection()
+        return CGSSpaceGetType(cid, CGSManagedDisplayGetCurrentSpace(cid, uuid)) == 4
     }
 
     private static func dropFrame() -> NSRect {
@@ -913,10 +947,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func trackSettings() {
         withObservationTracking {
             _ = lab.showInMenuBar
+            _ = lab.hideInFullscreen
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
                 self.statusItem.isVisible = self.lab.showInMenuBar
+                self.applyFullscreen()
                 self.trackSettings()
             }
         }
