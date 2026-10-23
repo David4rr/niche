@@ -1,5 +1,10 @@
 # changelog
 
+## 0.6.9
+
+- new "hide in full screen" setting in settings → general. the notch steps aside while an app is in full screen and comes back when you leave it. off by default.
+- memory: about 24 mb after launch, same as 0.6.8.2. the download stays 2.4 mb.
+
 ## 0.6.8.2
 
 - volume and brightness at 100 stay on one line instead of wrapping. thanks @David4rr.
