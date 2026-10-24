@@ -33,6 +33,34 @@ final class MusicPlayer {
     }
     let spectrum = AudioSpectrum()
     let output = OutputDevice()
+    let lyrics = LyricsService()
+    var allowsLyrics: Bool {
+        didSet {
+            UserDefaults.standard.set(allowsLyrics, forKey: "musicLyrics")
+            lyrics.update(track: track, position: position, isEnabled: allowsLyrics)
+            updateFastSync()
+        }
+    }
+    var isShowingLyrics = false {
+        didSet { updateFastSync() }
+    }
+
+    @ObservationIgnored private var fastSyncTimer: Timer?
+
+    private func updateFastSync() {
+        let shouldSync = allowsLyrics && isShowingLyrics && isPlaying
+        if shouldSync {
+            guard fastSyncTimer == nil else { return }
+            fastSyncTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    self?.tick()
+                }
+            }
+        } else {
+            fastSyncTimer?.invalidate()
+            fastSyncTimer = nil
+        }
+    }
 
     @ObservationIgnored private var elapsedAtTimestamp: Double = 0
     @ObservationIgnored private var timestamp = Date()
@@ -50,8 +78,12 @@ final class MusicPlayer {
     private static let musicApps: Set<String> = ["com.apple.Music", "com.spotify.client"]
 
     init() {
-        UserDefaults.standard.register(defaults: ["musicAnyApp": false])
+        UserDefaults.standard.register(defaults: [
+            "musicAnyApp": true,
+            "musicLyrics": true
+        ])
         allowsAnyApp = UserDefaults.standard.bool(forKey: "musicAnyApp")
+        allowsLyrics = UserDefaults.standard.object(forKey: "musicLyrics") as? Bool ?? true
         guard let handle = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_NOW),
               let send = dlsym(handle, "MRMediaRemoteSendCommand"),
               let setElapsed = dlsym(handle, "MRMediaRemoteSetElapsedTime"),
@@ -90,6 +122,8 @@ final class MusicPlayer {
     }
 
     func stop() {
+        fastSyncTimer?.invalidate()
+        fastSyncTimer = nil
         process?.terminationHandler = nil
         process?.terminate()
         spectrum.stop()
@@ -107,13 +141,17 @@ final class MusicPlayer {
                 self.pendingDeadline?.cancel()
                 self.track = nil
                 self.isPlaying = false
+                self.updateFastSync()
                 self.spectrum.follow(pid: nil)
+                self.lyrics.update(track: nil, position: 0, isEnabled: false)
             }
             return
         }
         clearTask?.cancel()
         clearTask = nil
+        let playingChanged = isPlaying != snapshot.isPlaying
         isPlaying = snapshot.isPlaying
+        if playingChanged { updateFastSync() }
         if let shuffle = snapshot.shuffleMode { isShuffled = shuffle != 1 }
         elapsedAtTimestamp = snapshot.elapsed
         timestamp = snapshot.timestamp
@@ -145,12 +183,16 @@ final class MusicPlayer {
         lastSong = next
         track = next
         tick()
+        lyrics.update(track: next, position: position, isEnabled: allowsLyrics)
     }
 
     func tick() {
         guard let track else { return }
         let live = isPlaying ? Date().timeIntervalSince(timestamp) * rate : 0
         position = min(max(elapsedAtTimestamp + live, 0), track.duration)
+        if allowsLyrics && isShowingLyrics {
+            lyrics.update(track: track, position: position, isEnabled: true)
+        }
     }
 
     func togglePlay() { _ = send(2, nil) }
@@ -168,6 +210,15 @@ final class MusicPlayer {
     func toggleShuffle() {
         setShuffle(isShuffled ? 1 : 3)
         isShuffled.toggle()
+    }
+
+    func toggleLyrics() {
+        isShowingLyrics.toggle()
+        if isShowingLyrics {
+            allowsLyrics = true
+            lyrics.update(track: track, position: position, isEnabled: true)
+        }
+        updateFastSync()
     }
 }
 
@@ -368,7 +419,7 @@ struct MarqueeText: View {
     let text: String
     let font: Font
     let width: CGFloat
-
+    var alignment: Alignment = .leading
     @State private var textWidth: CGFloat = 0
 
     var body: some View {
@@ -385,7 +436,7 @@ struct MarqueeText: View {
                 if textWidth > width { label }
             }
             .offset(x: offset)
-            .frame(width: width, alignment: .leading)
+            .frame(width: width, alignment: textWidth > width ? .leading : alignment)
             .clipped()
             .mask(
                 LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.06),
@@ -475,8 +526,27 @@ struct MusicExpandedView: View {
     }
 
     private func playing(_ track: Track) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            playerColumn(track)
+                .frame(width: width)
+
+            if player.allowsLyrics && player.isShowingLyrics {
+                Rectangle()
+                    .fill(.white.opacity(0.12))
+                    .frame(width: 1)
+                    .padding(.vertical, 2)
+
+                LyricsExpandedView(player: player, track: track)
+                    .frame(width: LabState.lyricsWidth - 17)
+                    .transition(.blurReplace.combined(with: .offset(x: 14)))
+            }
+        }
+        .foregroundStyle(.white)
+    }
+
+    private func playerColumn(_ track: Track) -> some View {
         let art: CGFloat = 56
-        let waveWidth: CGFloat = 4 * 2.5 * 1.75
+        let rightWidgetsWidth: CGFloat = 4 * 2.5 * 1.75 + 10 + 26
         let output = player.output
         return VStack(spacing: 0) {
             HStack(spacing: 14) {
@@ -485,7 +555,7 @@ struct MusicExpandedView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     ZStack(alignment: .leading) {
                         MarqueeText(text: track.title, font: .system(size: 13.5, weight: .semibold),
-                                    width: width - art - waveWidth - 30)
+                                    width: width - art - rightWidgetsWidth - 30)
                             .id(player.songChangeToken)
                             .transition(.blurReplace(.downUp))
                     }
@@ -500,7 +570,26 @@ struct MusicExpandedView: View {
                 }
                 .animation(.spring(Spring(duration: 0.38, bounce: 0.25), blendDuration: 0), value: player.songChangeToken)
                 Spacer(minLength: 0)
-                WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 2.5, maxHeight: 14)
+                HStack(spacing: 10) {
+                    WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 2.5, maxHeight: 14)
+                    Button {
+                        withAnimation(.spring(Spring(duration: 0.38, bounce: 0.2), blendDuration: 0)) {
+                            player.toggleLyrics()
+                        }
+                    } label: {
+                        Image(systemName: player.isShowingLyrics ? "quote.bubble.fill" : "quote.bubble")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(player.isShowingLyrics ? .white : .white.opacity(0.45))
+                            .frame(width: 26, height: 26)
+                            .background(
+                                Circle()
+                                    .fill(player.isShowingLyrics ? .white.opacity(0.22) : .white.opacity(0.08))
+                            )
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(player.isShowingLyrics ? "Hide lyrics" : "Show lyrics")
+                }
             }
             .frame(height: art)
             .padding(.bottom, 13)
@@ -522,27 +611,27 @@ struct MusicExpandedView: View {
                 }
                 ControlButton(action: { player.togglePlay() }) {
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 27, weight: .medium))
-                        .contentTransition(.symbolEffect(.replace.downUp.wholeSymbol))
-                        .animation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0), value: player.isPlaying)
-                }
-                ControlButton(action: { skips.forward += 1; player.skip(forward: true) }) {
-                    SkipGlyph(forward: true, trigger: skips.forward)
-                }
-                ControlButton(isActive: output.isShowingVolume, action: {
-                    withAnimation(.spring(Spring(duration: 0.4, bounce: 0.2), blendDuration: 0)) { output.isShowingVolume.toggle() }
-                }) {
-                    Image(systemName: output.symbol)
-                        .font(.system(size: 17, weight: .medium))
-                        .opacity(output.isShowingVolume ? 1 : 0.5)
-                        .contentTransition(.symbolEffect(.replace))
-                        .animation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0), value: output.symbol)
-                }
-                .disabled(!output.canSetVolume)
-            }
-            .frame(height: 30)
-            .padding(.horizontal, -10)
-            if output.isShowingVolume {
+                         .font(.system(size: 27, weight: .medium))
+                         .contentTransition(.symbolEffect(.replace.downUp.wholeSymbol))
+                         .animation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0), value: player.isPlaying)
+                 }
+                 ControlButton(action: { skips.forward += 1; player.skip(forward: true) }) {
+                     SkipGlyph(forward: true, trigger: skips.forward)
+                 }
+                 ControlButton(isActive: output.isShowingVolume, action: {
+                     withAnimation(.spring(Spring(duration: 0.4, bounce: 0.2), blendDuration: 0)) { output.isShowingVolume.toggle() }
+                 }) {
+                     Image(systemName: output.symbol)
+                         .font(.system(size: 17, weight: .medium))
+                         .opacity(output.isShowingVolume ? 1 : 0.5)
+                         .contentTransition(.symbolEffect(.replace))
+                         .animation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0), value: output.symbol)
+                 }
+                 .disabled(!output.canSetVolume)
+             }
+             .frame(height: 30)
+             .padding(.horizontal, -10)
+             if output.isShowingVolume {
                 HStack(spacing: 10) {
                     Button { output.toggleMute() } label: {
                         Image(systemName: output.isMuted ? "speaker.slash.fill" : "speaker.fill")
@@ -562,8 +651,6 @@ struct MusicExpandedView: View {
                 .transition(.blurReplace.combined(with: .offset(y: -8)))
             }
         }
-        .frame(width: width)
-        .foregroundStyle(.white)
     }
 
     private func timeLabel(_ seconds: Double, negative: Bool = false) -> some View {
@@ -652,6 +739,9 @@ struct MusicClosedView: View {
 
     var body: some View {
         let shown = player.track ?? lastTrack
+        let text = player.lyrics.activeLineText
+        let hasLyrics = player.allowsLyrics && player.isShowingLyrics && !text.isEmpty
+
         HStack(spacing: 0) {
             if let track = shown {
                 ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: LabState.closedArtRadius)
@@ -659,15 +749,47 @@ struct MusicClosedView: View {
                     .offset(y: LabState.closedArtOffset)
                     .padding(.leading, LabState.closedArtLeading)
                     .frame(width: Self.slot, alignment: .leading)
-                Spacer(minLength: 0)
-                WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)
+
+                if !LabState.hasNotch && hasLyrics {
+                    lyricsLabel(text: text)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 6)
+                } else {
+                    Spacer(minLength: 0)
+                }
+
+                if LabState.hasNotch && hasLyrics {
+                    HStack(spacing: 8) {
+                        lyricsLabel(text: text)
+                        WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)
+                    }
                     .padding(.trailing, 9)
-                    .frame(width: Self.slot, alignment: .trailing)
+                    .frame(width: Self.slot + player.lyrics.activeLineWidth + 14, alignment: .trailing)
+                } else {
+                    WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)
+                        .padding(.trailing, 9)
+                        .frame(width: Self.slot, alignment: .trailing)
+                }
             }
         }
         .onAppear { lastTrack = player.track }
         .onChange(of: player.track) { _, track in
             if let track { lastTrack = track }
         }
+    }
+
+    private func lyricsLabel(text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white)
+            .shadow(color: .white.opacity(0.35), radius: 6, x: 0, y: 0)
+            .lineLimit(1)
+            .fixedSize()
+            .id(text)
+            .transition(.asymmetric(
+                insertion: .offset(y: 8).combined(with: .opacity).combined(with: .scale(scale: 0.94)),
+                removal: .offset(y: -8).combined(with: .opacity).combined(with: .scale(scale: 0.94))
+            ))
+            .animation(.spring(response: 0.45, dampingFraction: 0.75, blendDuration: 0), value: text)
     }
 }

@@ -162,6 +162,11 @@ struct SettingsView: View {
             } footer: {
                 Text("Live bars follow the playing app's audio. Capturing it makes macOS show its purple recording indicator; with this off the bars move on their own and nothing is captured.")
             }
+            Section {
+                Toggle("Live lyrics", isOn: Binding(get: { player.allowsLyrics }, set: { player.allowsLyrics = $0 }))
+            } footer: {
+                Text("Shows time-synced lyrics in the expanded notch for playing songs via LRCLIB. Zero telemetry; only queries once when a song starts.")
+            }
         }
     }
 

@@ -146,6 +146,7 @@ final class LabState {
     static var notchExtra: CGFloat { max(0, hardwareNotch.height - 32) }
     static var openSize: CGSize { CGSize(width: hardwareNotch.width + 160, height: 175 + notchExtra) }
     static var agentsWidth: CGFloat { max(openSize.width + 40, 385) }
+    static let lyricsWidth: CGFloat = 240
     static var dropSize: CGSize { CGSize(width: closedSize(hasContent: true).width + 40, height: hardwareNotch.height + ClipboardDropZone.height) }
 
     var hasClosedContent: Bool { shownFeature != nil || idleArt != nil || lockState != .none || liveActivities.current != nil }
@@ -208,6 +209,8 @@ final class LabState {
             && player.track != nil && player.output.isShowingVolume ? 32 : 0
     }
 
+    var lyricsRoom: CGFloat { 0 }
+
     var agentsHeight: CGFloat { agentsHeight(showingAll: showsAllAgents, room: activityRoom) }
 
     func agentsHeight(showingAll: Bool, room: CGFloat) -> CGFloat {
@@ -219,14 +222,16 @@ final class LabState {
         return 18 + Self.notchExtra + room + UsageStrip.height + 12 + list + 16
     }
 
-    var panelHeight: CGFloat { max(Self.openSize.height, agents.isEmpty ? 0 : agentsHeight(showingAll: true, room: Self.activityRoomHeight)) + 60 }
+    var panelHeight: CGFloat { max(Self.openSize.height + 96 + 32, agents.isEmpty ? 0 : agentsHeight(showingAll: true, room: Self.activityRoomHeight)) + 60 }
 
     var currentSize: CGSize {
         if controller.isExpanded && openFeature == .agents {
             return CGSize(width: agents.usage.accounts.isEmpty ? Self.openSize.width : Self.agentsWidth, height: agentsHeight)
         }
         if controller.isExpanded {
-            return CGSize(width: Self.openSize.width, height: Self.openSize.height + activityRoom + volumeRoom)
+            let showingLyrics = openFeature != .agents && openFeature != .clipboard && player.track != nil && player.allowsLyrics && player.isShowingLyrics
+            let width = Self.openSize.width + (showingLyrics ? Self.lyricsWidth : 0)
+            return CGSize(width: width, height: Self.openSize.height + activityRoom + volumeRoom)
         }
         if isDropTarget { return Self.dropSize }
         let size = Self.closedSize(hasContent: hasClosedContent)
@@ -237,6 +242,18 @@ final class LabState {
     var closedRoom: (left: CGFloat, right: CGFloat) {
         guard !controller.isExpanded, !isDropTarget, lockState == .none, liveActivities.current == nil else { return (0, 0) }
         if shownFeature == nil { return idleArt != nil ? (-5, -MusicClosedView.slot) : (0, 0) }
+        if shownFeature == .music && player.allowsLyrics && player.isShowingLyrics {
+            let textWidth = player.lyrics.activeLineWidth
+            if textWidth > 0 {
+                if LabState.hasNotch {
+                    return (0, textWidth + 14)
+                } else {
+                    let extra = max(0, textWidth + 24 - 100)
+                    let half = ceil(extra / 2)
+                    return (half, half)
+                }
+            }
+        }
         guard shownFeature == .agents else { return (0, 0) }
         let kinds = AgentKind.allCases.filter { !agents.sessions(of: $0).isEmpty }.count
         guard kinds > 1 else { return (0, 0) }
@@ -880,7 +897,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static func panelFrame(height: CGFloat) -> NSRect {
         let screen = NotchScreen.shared.screen.frame
-        let width = max(LabState.openSize.width + 80, LabState.agentsWidth + 40)
+        let width = max(LabState.openSize.width + 80, LabState.agentsWidth + 40, LabState.openSize.width + LabState.lyricsWidth + 80)
         return NSRect(x: screen.midX - width / 2, y: screen.maxY - height, width: width, height: height)
     }
 
