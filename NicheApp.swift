@@ -66,6 +66,7 @@ final class LabState {
     private(set) var lockState = LockState.none
     private(set) var lockShown = false
     private(set) var isDropTarget = false
+    private(set) var isAside = false
 
     let controller = NotchController()
     let player = MusicPlayer()
@@ -369,6 +370,14 @@ final class LabState {
         }
     }
 
+    func setAside(_ on: Bool) {
+        guard on != isAside else { return }
+        if on { setOpen(false) }
+        withAnimation(on ? .spring(response: 0.35, dampingFraction: 1) : .spring(Spring(duration: 0.5, bounce: 0.32), blendDuration: 0)) {
+            isAside = on
+        }
+    }
+
     private func pulse() {
         pulseTask?.cancel()
         withAnimation(.spring(response: 0.28, dampingFraction: 0.62)) { controller.isLifted = true }
@@ -528,6 +537,9 @@ struct NicheView: View {
             .modifier(NotchSquashModifier(controller: c))
             .offset(x: lab.closedOffset)
             .animation(c.isCollapsing ? .spring(response: 0.38, dampingFraction: 0.95) : closedResize, value: lab.closedOffset)
+            .scaleEffect(lab.isAside ? 0.6 : 1, anchor: .top)
+            .blur(radius: lab.isAside ? 6 : 0)
+            .opacity(lab.isAside ? 0 : 1)
             .padding(.top, LabState.topGap)
             .contentShape(Rectangle())
             .onHover { lab.hover($0) }
@@ -767,7 +779,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shrinkTask: Task<Void, Never>?
     private var dropCatcher: NSPanel!
     private var signalSources: [DispatchSourceSignal] = []
-    private var isHidden = false
 
     static func main() {
         let app = NSApplication.shared
@@ -853,8 +864,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let panelFrame = self.panel.frame
             let hit = NSRect(x: panelFrame.midX + self.lab.closedOffset - notch.width / 2 - 8, y: panelFrame.maxY - gap - notch.height - 8,
                              width: notch.width + 16, height: gap + notch.height + 8)
-            self.panel.ignoresMouseEvents = self.isHidden || !hit.contains(NSEvent.mouseLocation)
-            self.dropCatcher.ignoresMouseEvents = self.isHidden || event.type != .leftMouseDragged
+            self.panel.ignoresMouseEvents = self.lab.isAside || !hit.contains(NSEvent.mouseLocation)
+            self.dropCatcher.ignoresMouseEvents = self.lab.isAside || event.type != .leftMouseDragged
         }
         monitors.append(NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: update) as Any)
         monitors.append(NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { update($0); return $0 } as Any)
@@ -892,17 +903,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applyFullscreen() {
-        let hide = lab.hideInFullscreen && Self.screenIsFullscreen()
-        guard hide != isHidden else { return }
-        isHidden = hide
-        let cid = CGSDefaultConnection()
-        if hide {
-            lab.setOpen(false)
-            panel.ignoresMouseEvents = true
-            CGSHideSpaces(cid, [notchSpace] as NSArray)
-        } else {
-            CGSShowSpaces(cid, [notchSpace] as NSArray)
-        }
+        lab.setAside(lab.hideInFullscreen && Self.screenIsFullscreen())
+        if lab.isAside { panel.ignoresMouseEvents = true }
     }
 
     private static func screenIsFullscreen() -> Bool {
