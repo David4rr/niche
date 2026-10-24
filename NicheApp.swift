@@ -66,6 +66,7 @@ final class LabState {
     private(set) var lockState = LockState.none
     private(set) var lockShown = false
     private(set) var isDropTarget = false
+    private(set) var isAside = false
 
     let controller = NotchController()
     let player = MusicPlayer()
@@ -209,8 +210,6 @@ final class LabState {
             && player.track != nil && player.output.isShowingVolume ? 32 : 0
     }
 
-    var lyricsRoom: CGFloat { 0 }
-
     var agentsHeight: CGFloat { agentsHeight(showingAll: showsAllAgents, room: activityRoom) }
 
     func agentsHeight(showingAll: Bool, room: CGFloat) -> CGFloat {
@@ -222,16 +221,15 @@ final class LabState {
         return 18 + Self.notchExtra + room + UsageStrip.height + 12 + list + 16
     }
 
-    var panelHeight: CGFloat { max(Self.openSize.height + 96 + 32, agents.isEmpty ? 0 : agentsHeight(showingAll: true, room: Self.activityRoomHeight)) + 60 }
+    var panelHeight: CGFloat { max(Self.openSize.height, agents.isEmpty ? 0 : agentsHeight(showingAll: true, room: Self.activityRoomHeight)) + 60 }
 
     var currentSize: CGSize {
         if controller.isExpanded && openFeature == .agents {
             return CGSize(width: agents.usage.accounts.isEmpty ? Self.openSize.width : Self.agentsWidth, height: agentsHeight)
         }
         if controller.isExpanded {
-            let showingLyrics = openFeature != .agents && openFeature != .clipboard && player.track != nil && player.allowsLyrics && player.isShowingLyrics
-            let width = Self.openSize.width + (showingLyrics ? Self.lyricsWidth : 0)
-            return CGSize(width: width, height: Self.openSize.height + activityRoom + volumeRoom)
+            let lyrics = openFeature != .clipboard && player.track != nil && player.isShowingLyrics ? Self.lyricsWidth : 0
+            return CGSize(width: Self.openSize.width + lyrics, height: Self.openSize.height + activityRoom + volumeRoom)
         }
         if isDropTarget { return Self.dropSize }
         let size = Self.closedSize(hasContent: hasClosedContent)
@@ -242,17 +240,11 @@ final class LabState {
     var closedRoom: (left: CGFloat, right: CGFloat) {
         guard !controller.isExpanded, !isDropTarget, lockState == .none, liveActivities.current == nil else { return (0, 0) }
         if shownFeature == nil { return idleArt != nil ? (-5, -MusicClosedView.slot) : (0, 0) }
-        if shownFeature == .music && player.allowsLyrics && player.isShowingLyrics {
-            let textWidth = player.lyrics.activeLineWidth
-            if textWidth > 0 {
-                if LabState.hasNotch {
-                    return (0, textWidth + 14)
-                } else {
-                    let extra = max(0, textWidth + 24 - 100)
-                    let half = ceil(extra / 2)
-                    return (half, half)
-                }
-            }
+        if shownFeature == .music && player.isShowingLyrics && player.lyrics.lineWidth > 0 {
+            let width = player.lyrics.lineWidth
+            if Self.hasNotch { return (0, width + 14) }
+            let half = ceil(max(0, width + 24 - 100) / 2)
+            return (half, half)
         }
         guard shownFeature == .agents else { return (0, 0) }
         let kinds = AgentKind.allCases.filter { !agents.sessions(of: $0).isEmpty }.count
@@ -383,6 +375,14 @@ final class LabState {
         guard on != isDropTarget else { return }
         withAnimation(on ? .spring(Spring(duration: 0.5, bounce: 0.32), blendDuration: 0) : .spring(response: 0.45, dampingFraction: 0.95)) {
             isDropTarget = on
+        }
+    }
+
+    func setAside(_ on: Bool) {
+        guard on != isAside else { return }
+        if on { setOpen(false) }
+        withAnimation(on ? .spring(response: 0.35, dampingFraction: 1) : .spring(Spring(duration: 0.5, bounce: 0.32), blendDuration: 0)) {
+            isAside = on
         }
     }
 
@@ -545,6 +545,9 @@ struct NicheView: View {
             .modifier(NotchSquashModifier(controller: c))
             .offset(x: lab.closedOffset)
             .animation(c.isCollapsing ? .spring(response: 0.38, dampingFraction: 0.95) : closedResize, value: lab.closedOffset)
+            .scaleEffect(lab.isAside ? 0.6 : 1, anchor: .top)
+            .blur(radius: lab.isAside ? 6 : 0)
+            .opacity(lab.isAside ? 0 : 1)
             .padding(.top, LabState.topGap)
             .contentShape(Rectangle())
             .onHover { lab.hover($0) }
@@ -573,7 +576,6 @@ struct NicheView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(closedResize, value: lab.hasClosedContent)
-        .animation(.spring(response: 0.44, dampingFraction: 0.84), value: size.width)
     }
 
     private var closedResize: Animation {
@@ -785,7 +787,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shrinkTask: Task<Void, Never>?
     private var dropCatcher: NSPanel!
     private var signalSources: [DispatchSourceSignal] = []
-    private var isHidden = false
 
     static func main() {
         let app = NSApplication.shared
@@ -871,8 +872,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let panelFrame = self.panel.frame
             let hit = NSRect(x: panelFrame.midX + self.lab.closedOffset - notch.width / 2 - 8, y: panelFrame.maxY - gap - notch.height - 8,
                              width: notch.width + 16, height: gap + notch.height + 8)
-            self.panel.ignoresMouseEvents = self.isHidden || !hit.contains(NSEvent.mouseLocation)
-            self.dropCatcher.ignoresMouseEvents = self.isHidden || event.type != .leftMouseDragged
+            self.panel.ignoresMouseEvents = self.lab.isAside || !hit.contains(NSEvent.mouseLocation)
+            self.dropCatcher.ignoresMouseEvents = self.lab.isAside || event.type != .leftMouseDragged
         }
         monitors.append(NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: update) as Any)
         monitors.append(NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { update($0); return $0 } as Any)
@@ -898,7 +899,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static func panelFrame(height: CGFloat) -> NSRect {
         let screen = NotchScreen.shared.screen.frame
-        let width = max(LabState.openSize.width + 80, LabState.agentsWidth + 40, LabState.openSize.width + LabState.lyricsWidth + 80)
+        let width = max(LabState.openSize.width + LabState.lyricsWidth + 80, LabState.agentsWidth + 40)
         return NSRect(x: screen.midX - width / 2, y: screen.maxY - height, width: width, height: height)
     }
 
@@ -910,19 +911,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applyFullscreen() {
-        let isHudActive = lab.liveActivities.current != nil
-        let hide = lab.hideInFullscreen && Self.screenIsFullscreen() && !isHudActive
-        guard hide != isHidden else { return }
-        isHidden = hide
-        let cid = CGSDefaultConnection()
-        if hide {
-            lab.setOpen(false)
-            panel.ignoresMouseEvents = true
-            CGSHideSpaces(cid, [notchSpace] as NSArray)
-        } else {
-            CGSShowSpaces(cid, [notchSpace] as NSArray)
-            panel.orderFrontRegardless()
-        }
+        lab.setAside(lab.hideInFullscreen && Self.screenIsFullscreen() && lab.liveActivities.current == nil)
+        if lab.isAside { panel.ignoresMouseEvents = true }
     }
 
     private static func screenIsFullscreen() -> Bool {
@@ -969,7 +959,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = lab.showInMenuBar
             _ = lab.hideInFullscreen
             _ = lab.liveActivities.current
-            _ = lab.liveActivities.isShowing
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
