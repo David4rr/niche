@@ -573,6 +573,7 @@ struct NicheView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(closedResize, value: lab.hasClosedContent)
+        .animation(.spring(response: 0.44, dampingFraction: 0.84), value: size.width)
     }
 
     private var closedResize: Animation {
@@ -909,7 +910,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applyFullscreen() {
-        let hide = lab.hideInFullscreen && Self.screenIsFullscreen()
+        let isHudActive = lab.liveActivities.current != nil
+        let hide = lab.hideInFullscreen && Self.screenIsFullscreen() && !isHudActive
         guard hide != isHidden else { return }
         isHidden = hide
         let cid = CGSDefaultConnection()
@@ -919,6 +921,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             CGSHideSpaces(cid, [notchSpace] as NSArray)
         } else {
             CGSShowSpaces(cid, [notchSpace] as NSArray)
+            panel.orderFrontRegardless()
         }
     }
 
@@ -965,6 +968,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         withObservationTracking {
             _ = lab.showInMenuBar
             _ = lab.hideInFullscreen
+            _ = lab.liveActivities.current
+            _ = lab.liveActivities.isShowing
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }

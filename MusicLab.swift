@@ -779,17 +779,25 @@ struct MusicClosedView: View {
     }
 
     private func lyricsLabel(text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11.5, weight: .semibold, design: .rounded))
-            .foregroundStyle(.white)
-            .shadow(color: .white.opacity(0.35), radius: 6, x: 0, y: 0)
-            .lineLimit(1)
-            .fixedSize()
-            .id(text)
-            .transition(.asymmetric(
-                insertion: .offset(y: 8).combined(with: .opacity).combined(with: .scale(scale: 0.94)),
-                removal: .offset(y: -8).combined(with: .opacity).combined(with: .scale(scale: 0.94))
-            ))
-            .animation(.spring(response: 0.45, dampingFraction: 0.75, blendDuration: 0), value: text)
+        ZStack {
+            Text(text)
+                .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
+                .shadow(color: .white.opacity(0.35), radius: 5, x: 0, y: 0)
+                .lineLimit(1)
+                .id(text)
+                .transition(.blurReplace(.downUp))
+        }
+        .frame(height: 18)
+        .clipped()
+        .mask(
+            LinearGradient(stops: [
+                .init(color: .clear, location: 0),
+                .init(color: .black, location: 0.15),
+                .init(color: .black, location: 0.85),
+                .init(color: .clear, location: 1.0)
+            ], startPoint: .top, endPoint: .bottom)
+        )
+        .animation(.spring(response: 0.44, dampingFraction: 0.84), value: text)
     }
 }
