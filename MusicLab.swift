@@ -20,8 +20,12 @@ struct Track: Equatable {
 @MainActor
 @Observable
 final class MusicPlayer {
-    private(set) var track: Track?
-    private(set) var isPlaying = false
+    private(set) var track: Track? {
+        didSet { followLyrics() }
+    }
+    private(set) var isPlaying = false {
+        didSet { followLyrics() }
+    }
     private(set) var isShuffled = false
     private(set) var position: Double = 0
     private(set) var songChangeToken = 0
@@ -33,10 +37,21 @@ final class MusicPlayer {
     }
     let spectrum = AudioSpectrum()
     let output = OutputDevice()
+    let lyrics = Lyrics()
+    var allowsLyrics: Bool {
+        didSet {
+            UserDefaults.standard.set(allowsLyrics, forKey: "musicLyrics")
+            if !allowsLyrics { isShowingLyrics = false }
+        }
+    }
+    var isShowingLyrics = false {
+        didSet { followLyrics() }
+    }
 
     @ObservationIgnored private var elapsedAtTimestamp: Double = 0
     @ObservationIgnored private var timestamp = Date()
     @ObservationIgnored private var rate: Double = 1
+    @ObservationIgnored private var lyricsTimer: Timer?
     @ObservationIgnored private var pendingSong: Track?
     @ObservationIgnored private var lastSong: Track?
     @ObservationIgnored private var pendingDeadline: Task<Void, Never>?
@@ -50,8 +65,9 @@ final class MusicPlayer {
     private static let musicApps: Set<String> = ["com.apple.Music", "com.spotify.client"]
 
     init() {
-        UserDefaults.standard.register(defaults: ["musicAnyApp": false])
+        UserDefaults.standard.register(defaults: ["musicAnyApp": false, "musicLyrics": true])
         allowsAnyApp = UserDefaults.standard.bool(forKey: "musicAnyApp")
+        allowsLyrics = UserDefaults.standard.bool(forKey: "musicLyrics")
         guard let handle = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_NOW),
               let send = dlsym(handle, "MRMediaRemoteSendCommand"),
               let setElapsed = dlsym(handle, "MRMediaRemoteSetElapsedTime"),
@@ -151,6 +167,20 @@ final class MusicPlayer {
         guard let track else { return }
         let live = isPlaying ? Date().timeIntervalSince(timestamp) * rate : 0
         position = min(max(elapsedAtTimestamp + live, 0), track.duration)
+        if isShowingLyrics { lyrics.sync(position) }
+    }
+
+    private func followLyrics() {
+        lyrics.load(isShowingLyrics ? track : nil)
+        let follow = isShowingLyrics && isPlaying
+        guard follow != (lyricsTimer != nil) else { return }
+        lyricsTimer?.invalidate()
+        lyricsTimer = follow ? Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.lyrics.sync(self.elapsedAtTimestamp + Date().timeIntervalSince(self.timestamp) * self.rate)
+            }
+        } : nil
     }
 
     func togglePlay() { _ = send(2, nil) }
@@ -475,8 +505,20 @@ struct MusicExpandedView: View {
     }
 
     private func playing(_ track: Track) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            controls(track)
+            if player.isShowingLyrics {
+                Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: LyricsView.height)
+                LyricsView(player: player, track: track)
+                    .frame(width: LabState.lyricsWidth - 33)
+                    .transition(.blurReplace.combined(with: .offset(x: 14)))
+            }
+        }
+    }
+
+    private func controls(_ track: Track) -> some View {
         let art: CGFloat = 56
-        let waveWidth: CGFloat = 4 * 2.5 * 1.75
+        let waveWidth: CGFloat = 4 * 2.5 * 1.75 + (player.allowsLyrics ? 26 : 0)
         let output = player.output
         return VStack(spacing: 0) {
             HStack(spacing: 14) {
@@ -501,6 +543,20 @@ struct MusicExpandedView: View {
                 .animation(.spring(Spring(duration: 0.38, bounce: 0.25), blendDuration: 0), value: player.songChangeToken)
                 Spacer(minLength: 0)
                 WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 2.5, maxHeight: 14)
+                if player.allowsLyrics {
+                    Button {
+                        withAnimation(.spring(Spring(duration: 0.4, bounce: 0.2), blendDuration: 0)) { player.isShowingLyrics.toggle() }
+                    } label: {
+                        Image(systemName: player.isShowingLyrics ? "quote.bubble.fill" : "quote.bubble")
+                            .font(.system(size: 13, weight: .medium))
+                            .opacity(player.isShowingLyrics ? 1 : 0.5)
+                            .contentTransition(.symbolEffect(.replace))
+                            .frame(width: 26, height: 26)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, -14)
+                }
             }
             .frame(height: art)
             .padding(.bottom, 13)
@@ -652,6 +708,8 @@ struct MusicClosedView: View {
 
     var body: some View {
         let shown = player.track ?? lastTrack
+        let line = player.isShowingLyrics ? player.lyrics.line : ""
+        let besideNotch = LabState.hasNotch && !line.isEmpty
         HStack(spacing: 0) {
             if let track = shown {
                 ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: LabState.closedArtRadius)
@@ -659,15 +717,35 @@ struct MusicClosedView: View {
                     .offset(y: LabState.closedArtOffset)
                     .padding(.leading, LabState.closedArtLeading)
                     .frame(width: Self.slot, alignment: .leading)
-                Spacer(minLength: 0)
-                WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)
-                    .padding(.trailing, 9)
-                    .frame(width: Self.slot, alignment: .trailing)
+                if line.isEmpty || besideNotch {
+                    Spacer(minLength: 0)
+                } else {
+                    lyric(line).frame(maxWidth: .infinity)
+                }
+                HStack(spacing: 8) {
+                    if besideNotch { lyric(line) }
+                    WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)
+                }
+                .padding(.trailing, 9)
+                .frame(width: Self.slot + (besideNotch ? player.lyrics.lineWidth + 14 : 0), alignment: .trailing)
             }
         }
         .onAppear { lastTrack = player.track }
         .onChange(of: player.track) { _, track in
             if let track { lastTrack = track }
         }
+    }
+
+    private func lyric(_ text: String) -> some View {
+        ZStack {
+            Text(text)
+                .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .id(text)
+                .transition(.blurReplace(.downUp))
+        }
+        .frame(height: 18)
+        .clipped()
     }
 }
