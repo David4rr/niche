@@ -81,7 +81,6 @@ final class LabState {
     @ObservationIgnored private var unlockTask: Task<Void, Never>?
     @ObservationIgnored var setKeyCapture: ((Bool) -> Void)?
     @ObservationIgnored private var pulseTask: Task<Void, Never>?
-
     init() {
         let defaults = UserDefaults.standard
         defaults.register(defaults: ["showInMenuBar": true, "liveVisualizer": false, "showAgents": true,
@@ -147,8 +146,15 @@ final class LabState {
     static var notchExtra: CGFloat { max(0, hardwareNotch.height - 32) }
     static var openSize: CGSize { CGSize(width: hardwareNotch.width + 160, height: 175 + notchExtra) }
     static var agentsWidth: CGFloat { max(openSize.width + 40, 385) }
-    static let lyricsWidth: CGFloat = 240
-    static var dropSize: CGSize { CGSize(width: closedSize(hasContent: true).width + 40, height: hardwareNotch.height + ClipboardDropZone.height) }
+    static let lyricsWidth: CGFloat = 272
+    static var maxClosedLyricsWidth: CGFloat {
+        let screenWidth = NotchScreen.shared.screen.frame.width
+        if hasNotch {
+            return max(280, floor((screenWidth - hardwareNotch.width) / 2) - 64)
+        }
+        return min(max(320, screenWidth - 160), 760)
+    }
+    static var dropSize: CGSize { CGSize(width: closedSize(hasContent: true).width + 88, height: hardwareNotch.height + ClipboardDropZone.height) }
 
     var hasClosedContent: Bool { shownFeature != nil || idleArt != nil || lockState != .none || liveActivities.current != nil }
 
@@ -196,7 +202,7 @@ final class LabState {
         withAnimation(.spring(response: 0.45, dampingFraction: 0.95)) { idleArt = nil }
     }
     var showsAllAgents = false
-    var hasOpenableContent: Bool { player.track != nil || !agents.isEmpty || peekFeature == .clipboard }
+    var hasOpenableContent: Bool { !activeFeatures.isEmpty }
 
     static var activityRoomHeight: CGFloat { hardwareNotch.height + (isIsland ? 7 : 0) + 4 - 18 }
 
@@ -210,6 +216,8 @@ final class LabState {
             && player.track != nil && player.output.isShowingVolume ? 32 : 0
     }
 
+    var lyricsRoom: CGFloat { 0 }
+
     var agentsHeight: CGFloat { agentsHeight(showingAll: showsAllAgents, room: activityRoom) }
 
     func agentsHeight(showingAll: Bool, room: CGFloat) -> CGFloat {
@@ -221,15 +229,16 @@ final class LabState {
         return 18 + Self.notchExtra + room + UsageStrip.height + 12 + list + 16
     }
 
-    var panelHeight: CGFloat { max(Self.openSize.height, agents.isEmpty ? 0 : agentsHeight(showingAll: true, room: Self.activityRoomHeight)) + 60 }
+    var panelHeight: CGFloat { max(Self.openSize.height + 96 + 32, agents.isEmpty ? 0 : agentsHeight(showingAll: true, room: Self.activityRoomHeight)) + 60 }
 
     var currentSize: CGSize {
         if controller.isExpanded && openFeature == .agents {
             return CGSize(width: agents.usage.accounts.isEmpty ? Self.openSize.width : Self.agentsWidth, height: agentsHeight)
         }
         if controller.isExpanded {
-            let lyrics = openFeature != .clipboard && player.track != nil && player.isShowingLyrics ? Self.lyricsWidth : 0
-            return CGSize(width: Self.openSize.width + lyrics, height: Self.openSize.height + activityRoom + volumeRoom)
+            let showingLyrics = openFeature != .agents && openFeature != .clipboard && player.track != nil && player.allowsLyrics && player.isShowingLyrics
+            let width = Self.openSize.width + (showingLyrics ? Self.lyricsWidth : 0)
+            return CGSize(width: width, height: Self.openSize.height + activityRoom + volumeRoom)
         }
         if isDropTarget { return Self.dropSize }
         let size = Self.closedSize(hasContent: hasClosedContent)
@@ -240,11 +249,17 @@ final class LabState {
     var closedRoom: (left: CGFloat, right: CGFloat) {
         guard !controller.isExpanded, !isDropTarget, lockState == .none, liveActivities.current == nil else { return (0, 0) }
         if shownFeature == nil { return idleArt != nil ? (-5, -MusicClosedView.slot) : (0, 0) }
-        if shownFeature == .music && player.isShowingLyrics && player.lyrics.lineWidth > 0 {
-            let width = player.lyrics.lineWidth
-            if Self.hasNotch { return (0, width + 14) }
-            let half = ceil(max(0, width + 24 - 100) / 2)
-            return (half, half)
+        if shownFeature == .music && player.allowsLyrics && player.isShowingLyrics {
+            let textWidth = player.lyrics.activeLineWidth
+            if textWidth > 0 {
+                if LabState.hasNotch {
+                    return (0, textWidth + 18)
+                } else {
+                    let extra = max(0, textWidth + 16 - Self.hardwareNotch.width)
+                    let half = ceil(extra / 2)
+                    return (half, half)
+                }
+            }
         }
         guard shownFeature == .agents else { return (0, 0) }
         let kinds = AgentKind.allCases.filter { !agents.sessions(of: $0).isEmpty }.count
@@ -278,7 +293,7 @@ final class LabState {
     }
 
     var openFeature: Feature? {
-        if peekFeature == .clipboard && !clipboard.items.isEmpty { return .clipboard }
+        if peekFeature == .clipboard, clipboard.isOn, !clipboard.items.isEmpty { return .clipboard }
         if let feature = peekFeature, activeFeatures.contains(feature) { return feature }
         return shownFeature
     }
@@ -291,7 +306,7 @@ final class LabState {
 
     func switchFeature() {
         guard let next = upcomingFeatures.first else { return }
-        peekFeature = nil
+        peekFeature = next
         selectedFeature = next
     }
 
@@ -309,6 +324,15 @@ final class LabState {
 
     func pick(_ item: ClipboardHistory.Item) {
         clipboard.copy(item)
+        finishPick(item)
+    }
+
+    func pickSelected() {
+        guard let first = clipboard.copySelected() else { return }
+        finishPick(first)
+    }
+
+    private func finishPick(_ item: ClipboardHistory.Item) {
         setOpen(false)
         guard clipboard.pastesOnPick && AXIsProcessTrusted() else {
             liveActivities.copied(icon: item.app, image: item.image, color: Self.color(for: item), symbol: Self.symbol(for: item.kind))
@@ -329,10 +353,22 @@ final class LabState {
         guard !items.isEmpty else { return setOpen(false) }
         let columns = 5
         var selection = clipboard.selection
+        let current = items[min(selection, items.count - 1)]
+        if event.modifierFlags.contains(.command), Int(event.keyCode) == kVK_ANSI_A {
+            clipboard.selectAll()
+            return
+        }
         switch Int(event.keyCode) {
-        case kVK_Escape: return setOpen(false)
-        case kVK_Return, kVK_ANSI_KeypadEnter: return pick(items[min(selection, items.count - 1)])
-        case kVK_Delete, kVK_ForwardDelete: return clipboard.remove(items[min(selection, items.count - 1)])
+        case kVK_Escape:
+            if !clipboard.selectedIDs.isEmpty { clipboard.clearSelection() } else { setOpen(false) }
+            return
+        case kVK_Space:
+            clipboard.toggleSelect(current)
+            return
+        case kVK_Return, kVK_ANSI_KeypadEnter:
+            if !clipboard.selectedIDs.isEmpty { pickSelected() } else { pick(current) }
+            return
+        case kVK_Delete, kVK_ForwardDelete: return clipboard.remove(current)
         case kVK_LeftArrow: selection -= 1
         case kVK_RightArrow: selection += 1
         case kVK_UpArrow: selection -= columns
@@ -373,7 +409,7 @@ final class LabState {
 
     func setDropTarget(_ on: Bool) {
         guard on != isDropTarget else { return }
-        withAnimation(on ? .spring(Spring(duration: 0.5, bounce: 0.32), blendDuration: 0) : .spring(response: 0.45, dampingFraction: 0.95)) {
+        withAnimation(.spring(response: 0.36, dampingFraction: 0.86)) {
             isDropTarget = on
         }
     }
@@ -474,14 +510,16 @@ struct NicheView: View {
                                     .frame(width: (lab.agents.usage.accounts.isEmpty ? LabState.openSize.width : LabState.agentsWidth) - 2 * 18,
                                            alignment: .top)
                                     .padding(.top, lab.agents.usage.accounts.isEmpty ? LabState.hardwareNotch.height + 2 : 18 + LabState.notchExtra + lab.activityRoom)
+                                    .drawingGroup()
                             } else if lab.openFeature == .clipboard {
-                                ClipboardView(history: lab.clipboard) { lab.pick($0) }
+                                ClipboardView(history: lab.clipboard, onPick: { lab.pick($0) }, onPickSelected: { lab.pickSelected() })
                                     .frame(width: LabState.openSize.width - 2 * 18,
                                            height: LabState.openSize.height - LabState.hardwareNotch.height - 16, alignment: .top)
                                     .padding(.top, LabState.hardwareNotch.height + 4)
                             } else {
                                 MusicExpandedView(player: lab.player, width: LabState.openSize.width - 2 * 18)
                                     .padding(.top, 18 + LabState.notchExtra + lab.activityRoom)
+                                    .drawingGroup()
                             }
                         }
                         .id(lab.openFeature)
@@ -493,16 +531,14 @@ struct NicheView: View {
                     }
                         .frame(width: size.width + 2 * 16, height: size.height, alignment: .top)
                         .overlay(alignment: .top) { topRow }
-                        .drawingGroup()
                         .blur(radius: c.isSharp ? 0 : 5)
                         .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.12)),
                                                 removal: .opacity.animation(.easeOut(duration: 0.1))))
                 } else if lab.isDropTarget {
-                    ClipboardDropZone()
+                    ClipboardDropZone(preview: lab.clipboard.dragPreview)
                         .padding(.top, LabState.hardwareNotch.height)
                         .frame(width: size.width, height: size.height, alignment: .top)
-                        .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.12)),
-                                                removal: .opacity.animation(.easeOut(duration: 0.1))))
+                        .transition(.opacity.animation(.easeOut(duration: 0.14)))
                 } else if lab.lockState != .none {
                     LockIndicator(state: lab.lockState, isShown: lab.lockShown)
                         .frame(width: LabState.closedSize(hasContent: true).width, height: LabState.hardwareNotch.height)
@@ -544,7 +580,7 @@ struct NicheView: View {
             }
             .modifier(NotchSquashModifier(controller: c))
             .offset(x: lab.closedOffset)
-            .animation(c.isCollapsing ? .spring(response: 0.38, dampingFraction: 0.95) : closedResize, value: lab.closedOffset)
+            .animation(closedMorph, value: lab.closedOffset)
             .scaleEffect(lab.isAside ? 0.6 : 1, anchor: .top)
             .blur(radius: lab.isAside ? 6 : 0)
             .opacity(lab.isAside ? 0 : 1)
@@ -576,6 +612,16 @@ struct NicheView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(closedResize, value: lab.hasClosedContent)
+        .animation(closedMorph, value: lab.closedRoom.left + lab.closedRoom.right)
+        .animation(.spring(Spring(duration: 0.46, bounce: 0.28), blendDuration: 0), value: lab.isDropTarget)
+    }
+
+    private var closedMorph: Animation {
+        if lab.controller.isCollapsing { return .spring(response: 0.38, dampingFraction: 0.95) }
+        if !lab.controller.isExpanded && lab.shownFeature == .music && lab.player.allowsLyrics && lab.player.isShowingLyrics {
+            return .spring(response: 0.45, dampingFraction: 0.82, blendDuration: 0)
+        }
+        return closedResize
     }
 
     private var closedResize: Animation {
@@ -613,9 +659,9 @@ struct NicheView: View {
             Spacer(minLength: 0)
             let upcoming = lab.upcomingFeatures
             if !upcoming.isEmpty, let current = lab.openFeature {
-                let stack = upcoming + [current]
+                let stack = [current] + upcoming
                 Button {
-                    hop = stack.first
+                    hop = upcoming.first
                     withAnimation(.spring(Spring(duration: 0.45, bounce: 0.3), blendDuration: 0)) { lab.switchFeature() }
                     Task {
                         try? await Task.sleep(for: .seconds(0.16))
@@ -862,22 +908,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             signalSources.append(source)
         }
         playbackTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.lab.player.tick() }
+            MainActor.assumeIsolated { self?.lab.player.tick() }
         }
 
+        var isExternalMouseDown = false
+        var lastIgnorePanel = false
+        var lastIgnoreDrop = true
         let update: (NSEvent) -> Void = { [weak self] event in
             guard let self else { return }
-            let notch = self.lab.currentSize
-            let gap = LabState.topGap
-            let panelFrame = self.panel.frame
-            let hit = NSRect(x: panelFrame.midX + self.lab.closedOffset - notch.width / 2 - 8, y: panelFrame.maxY - gap - notch.height - 8,
-                             width: notch.width + 16, height: gap + notch.height + 8)
-            self.panel.ignoresMouseEvents = self.lab.isAside || !hit.contains(NSEvent.mouseLocation)
-            self.dropCatcher.ignoresMouseEvents = self.lab.isAside || event.type != .leftMouseDragged
+            let buttonDown = (NSEvent.pressedMouseButtons & 1) != 0
+            if !buttonDown || event.type == .leftMouseUp {
+                isExternalMouseDown = false
+                self.lab.clipboard.isDraggingOut = false
+            } else if event.type == .leftMouseDragged && !self.lab.clipboard.isDraggingOut {
+                isExternalMouseDown = true
+            }
+            let externalDrag = !self.lab.clipboard.isDraggingOut && (isExternalMouseDown || self.lab.isDropTarget)
+            let insideHit: Bool
+            if externalDrag {
+                insideHit = false
+            } else {
+                let loc = NSEvent.mouseLocation
+                let panelFrame = self.panel.frame
+                let notch = self.lab.currentSize
+                let gap = LabState.topGap
+                if loc.y < panelFrame.maxY - gap - notch.height - 8 {
+                    insideHit = false
+                } else {
+                    let hitX = panelFrame.midX + self.lab.closedOffset - notch.width / 2 - 8
+                    insideHit = loc.x >= hitX && loc.x <= hitX + notch.width + 16
+                }
+                if event.type == .leftMouseDown { isExternalMouseDown = !insideHit }
+            }
+            let ignorePanel = self.lab.isAside || externalDrag || !insideHit
+            let ignoreDrop = self.lab.isAside || !externalDrag
+            if ignorePanel != lastIgnorePanel {
+                lastIgnorePanel = ignorePanel
+                self.panel.ignoresMouseEvents = ignorePanel
+            }
+            if ignoreDrop != lastIgnoreDrop {
+                lastIgnoreDrop = ignoreDrop
+                self.dropCatcher.ignoresMouseEvents = ignoreDrop
+            }
         }
-        monitors.append(NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: update) as Any)
-        monitors.append(NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { update($0); return $0 } as Any)
-
+        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseUp]
+        monitors.append(NSEvent.addGlobalMonitorForEvents(matching: mask, handler: update) as Any)
+        monitors.append(NSEvent.addLocalMonitorForEvents(matching: mask) { update($0); return $0 } as Any)
         monitors.append(NSEvent.addLocalMonitorForEvents(matching: .rightMouseDown) { [weak self] event in
             guard let self, event.window === self.panel, let view = self.panel.contentView else { return event }
             let menu = NSMenu()
@@ -899,7 +975,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static func panelFrame(height: CGFloat) -> NSRect {
         let screen = NotchScreen.shared.screen.frame
-        let width = max(LabState.openSize.width + LabState.lyricsWidth + 80, LabState.agentsWidth + 40)
+        let width = min(screen.width, max(LabState.openSize.width + LabState.lyricsWidth + 80, LabState.agentsWidth + 40, LabState.maxClosedLyricsWidth + 120))
         return NSRect(x: screen.midX - width / 2, y: screen.maxY - height, width: width, height: height)
     }
 
@@ -926,8 +1002,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static func dropFrame() -> NSRect {
         let screen = NotchScreen.shared.screen.frame
         let size = LabState.dropSize
-        return NSRect(x: screen.midX - size.width / 2, y: screen.maxY - LabState.topGap - size.height,
-                      width: size.width, height: LabState.topGap + size.height)
+        return NSRect(x: screen.midX - size.width / 2 - 12, y: screen.maxY - LabState.topGap - size.height - 8,
+                      width: size.width + 24, height: LabState.topGap + size.height + 8)
     }
 
     private func trackPanelHeight() {
@@ -959,6 +1035,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = lab.showInMenuBar
             _ = lab.hideInFullscreen
             _ = lab.liveActivities.current
+            _ = lab.liveActivities.isShowing
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
