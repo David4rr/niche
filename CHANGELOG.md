@@ -1,5 +1,12 @@
 # changelog
 
+## 0.6.9.1
+
+- lyrics: a lyrics button in the player opens time-synced lyrics beside it, and the current line follows you into the closed notch. click a line to jump there. lyrics come from lrclib.net, which only sees the songs you open lyrics for. turn the button off in settings → music. thanks @David4rr.
+- the notch fades and shrinks away when an app goes full screen, and grows back when you leave.
+- volume and brightness still show up in full screen while the notch is hidden.
+- memory: about 24 mb after launch, same as 0.6.9. the download stays 2.3 mb.
+
 ## 0.6.9
 
 - new "hide in full screen" setting in settings → general. the notch steps aside while an app is in full screen and comes back when you leave it. off by default.
