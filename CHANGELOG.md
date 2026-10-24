@@ -1,5 +1,13 @@
 # changelog
 
+## 0.6.9.2
+
+- clipboard: pick several items at once with ⌘-click, shift-click, the check on each tile, or space. ⌘a picks all, esc lets go. pasting joins text with new lines, and picked files paste together. thanks @David4rr.
+- dropping several files on the notch adds each one as its own tile, and the drop strip shows what you're dropping.
+- lyrics: better matches for songs with more than one artist, wrong-length versions are skipped, and lyric files with offsets or word timings now line up. long lines shrink to fit instead of cutting off.
+- the visualizer does its sound math without allocating and updates the notch 24 times a second instead of 60.
+- memory: about 25 mb after launch, same as 0.6.9.1. the download is 2.4 mb.
+
 ## 0.6.9.1
 
 - lyrics: a lyrics button in the player opens time-synced lyrics beside it, and the current line follows you into the closed notch. click a line to jump there. lyrics come from lrclib.net, which only sees the songs you open lyrics for. turn the button off in settings → music. thanks @David4rr.
