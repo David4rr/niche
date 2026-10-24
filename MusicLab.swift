@@ -20,8 +20,12 @@ struct Track: Equatable {
 @MainActor
 @Observable
 final class MusicPlayer {
-    private(set) var track: Track?
-    private(set) var isPlaying = false
+    private(set) var track: Track? {
+        didSet { followLyrics() }
+    }
+    private(set) var isPlaying = false {
+        didSet { followLyrics() }
+    }
     private(set) var isShuffled = false
     private(set) var position: Double = 0
     private(set) var songChangeToken = 0
@@ -33,36 +37,21 @@ final class MusicPlayer {
     }
     let spectrum = AudioSpectrum()
     let output = OutputDevice()
-    let lyrics = LyricsService()
+    let lyrics = Lyrics()
     var allowsLyrics: Bool {
         didSet {
             UserDefaults.standard.set(allowsLyrics, forKey: "musicLyrics")
-            lyrics.update(track: track, position: position, isEnabled: allowsLyrics)
-            updateFastSync()
+            if !allowsLyrics { isShowingLyrics = false }
         }
     }
     var isShowingLyrics = false {
-        didSet { updateFastSync() }
-    }
-
-    @ObservationIgnored private var fastSyncTimer: Timer?
-
-    private func updateFastSync() {
-        let shouldSync = allowsLyrics && isShowingLyrics && isPlaying
-        if shouldSync {
-            guard fastSyncTimer == nil else { return }
-            fastSyncTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.syncLyrics() }
-            }
-        } else {
-            fastSyncTimer?.invalidate()
-            fastSyncTimer = nil
-        }
+        didSet { followLyrics() }
     }
 
     @ObservationIgnored private var elapsedAtTimestamp: Double = 0
     @ObservationIgnored private var timestamp = Date()
     @ObservationIgnored private var rate: Double = 1
+    @ObservationIgnored private var lyricsTimer: Timer?
     @ObservationIgnored private var pendingSong: Track?
     @ObservationIgnored private var lastSong: Track?
     @ObservationIgnored private var pendingDeadline: Task<Void, Never>?
@@ -76,12 +65,9 @@ final class MusicPlayer {
     private static let musicApps: Set<String> = ["com.apple.Music", "com.spotify.client"]
 
     init() {
-        UserDefaults.standard.register(defaults: [
-            "musicAnyApp": true,
-            "musicLyrics": true
-        ])
+        UserDefaults.standard.register(defaults: ["musicAnyApp": false, "musicLyrics": true])
         allowsAnyApp = UserDefaults.standard.bool(forKey: "musicAnyApp")
-        allowsLyrics = UserDefaults.standard.object(forKey: "musicLyrics") as? Bool ?? true
+        allowsLyrics = UserDefaults.standard.bool(forKey: "musicLyrics")
         guard let handle = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_NOW),
               let send = dlsym(handle, "MRMediaRemoteSendCommand"),
               let setElapsed = dlsym(handle, "MRMediaRemoteSetElapsedTime"),
@@ -120,8 +106,6 @@ final class MusicPlayer {
     }
 
     func stop() {
-        fastSyncTimer?.invalidate()
-        fastSyncTimer = nil
         process?.terminationHandler = nil
         process?.terminate()
         spectrum.stop()
@@ -139,17 +123,13 @@ final class MusicPlayer {
                 self.pendingDeadline?.cancel()
                 self.track = nil
                 self.isPlaying = false
-                self.updateFastSync()
                 self.spectrum.follow(pid: nil)
-                self.lyrics.update(track: nil, position: 0, isEnabled: false)
             }
             return
         }
         clearTask?.cancel()
         clearTask = nil
-        let playingChanged = isPlaying != snapshot.isPlaying
         isPlaying = snapshot.isPlaying
-        if playingChanged { updateFastSync() }
         if let shuffle = snapshot.shuffleMode { isShuffled = shuffle != 1 }
         elapsedAtTimestamp = snapshot.elapsed
         timestamp = snapshot.timestamp
@@ -181,22 +161,27 @@ final class MusicPlayer {
         lastSong = next
         track = next
         tick()
-        lyrics.update(track: next, position: position, isEnabled: allowsLyrics)
     }
 
     func tick() {
         guard let track else { return }
         let live = isPlaying ? Date().timeIntervalSince(timestamp) * rate : 0
-        let nextPos = min(max(elapsedAtTimestamp + live, 0), track.duration)
-        if abs(position - nextPos) > 0.0005 { position = nextPos }
-        syncLyrics()
+        let next = min(max(elapsedAtTimestamp + live, 0), track.duration)
+        if next != position { position = next }
+        if isShowingLyrics { lyrics.sync(position) }
     }
 
-    private func syncLyrics() {
-        guard let track, allowsLyrics, isShowingLyrics else { return }
-        let live = isPlaying ? Date().timeIntervalSince(timestamp) * rate : 0
-        let pos = min(max(elapsedAtTimestamp + live, 0), track.duration)
-        lyrics.update(track: track, position: pos, isEnabled: true)
+    private func followLyrics() {
+        lyrics.load(isShowingLyrics ? track : nil)
+        let follow = isShowingLyrics && isPlaying
+        guard follow != (lyricsTimer != nil) else { return }
+        lyricsTimer?.invalidate()
+        lyricsTimer = follow ? Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.lyrics.sync(self.elapsedAtTimestamp + Date().timeIntervalSince(self.timestamp) * self.rate)
+            }
+        } : nil
     }
 
     func togglePlay() { _ = send(2, nil) }
@@ -214,15 +199,6 @@ final class MusicPlayer {
     func toggleShuffle() {
         setShuffle(isShuffled ? 1 : 3)
         isShuffled.toggle()
-    }
-
-    func toggleLyrics() {
-        isShowingLyrics.toggle()
-        if isShowingLyrics {
-            allowsLyrics = true
-            lyrics.update(track: track, position: position, isEnabled: true)
-        }
-        updateFastSync()
     }
 }
 
@@ -424,7 +400,7 @@ struct MarqueeText: View {
     let text: String
     let font: Font
     let width: CGFloat
-    var alignment: Alignment = .leading
+
     @State private var textWidth: CGFloat = 0
 
     var body: some View {
@@ -441,7 +417,7 @@ struct MarqueeText: View {
                 if textWidth > width { label }
             }
             .offset(x: offset)
-            .frame(width: width, alignment: textWidth > width ? .leading : alignment)
+            .frame(width: width, alignment: .leading)
             .clipped()
             .mask(
                 LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.06),
@@ -532,26 +508,19 @@ struct MusicExpandedView: View {
 
     private func playing(_ track: Track) -> some View {
         HStack(alignment: .top, spacing: 16) {
-            playerColumn(track)
-                .frame(width: width)
-
-            if player.allowsLyrics && player.isShowingLyrics {
-                Rectangle()
-                    .fill(.white.opacity(0.12))
-                    .frame(width: 1)
-                    .padding(.vertical, 2)
-
-                LyricsExpandedView(player: player, track: track)
-                    .frame(width: LabState.lyricsWidth - 17)
+            controls(track)
+            if player.isShowingLyrics {
+                Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: LyricsView.height)
+                LyricsView(player: player, track: track)
+                    .frame(width: LabState.lyricsWidth - 33)
                     .transition(.blurReplace.combined(with: .offset(x: 14)))
             }
         }
-        .foregroundStyle(.white)
     }
 
-    private func playerColumn(_ track: Track) -> some View {
+    private func controls(_ track: Track) -> some View {
         let art: CGFloat = 56
-        let rightWidgetsWidth: CGFloat = 4 * 2.5 * 1.75 + 10 + 26
+        let waveWidth: CGFloat = 4 * 2.5 * 1.75 + (player.allowsLyrics ? 26 : 0)
         let output = player.output
         return VStack(spacing: 0) {
             HStack(spacing: 14) {
@@ -560,7 +529,7 @@ struct MusicExpandedView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     ZStack(alignment: .leading) {
                         MarqueeText(text: track.title, font: .system(size: 13.5, weight: .semibold),
-                                    width: width - art - rightWidgetsWidth - 30)
+                                    width: width - art - waveWidth - 30)
                             .id(player.songChangeToken)
                             .transition(.blurReplace(.downUp))
                     }
@@ -575,25 +544,20 @@ struct MusicExpandedView: View {
                 }
                 .animation(.spring(Spring(duration: 0.38, bounce: 0.25), blendDuration: 0), value: player.songChangeToken)
                 Spacer(minLength: 0)
-                HStack(spacing: 10) {
-                    WaveformView(track: track, spectrum: player.spectrum, isPlaying: player.isPlaying, barWidth: 2.5, maxHeight: 14)
+                WaveformView(track: track, spectrum: player.spectrum, isPlaying: player.isPlaying, barWidth: 2.5, maxHeight: 14)
+                if player.allowsLyrics {
                     Button {
-                        withAnimation(.spring(Spring(duration: 0.38, bounce: 0.2), blendDuration: 0)) {
-                            player.toggleLyrics()
-                        }
+                        withAnimation(.spring(Spring(duration: 0.4, bounce: 0.2), blendDuration: 0)) { player.isShowingLyrics.toggle() }
                     } label: {
                         Image(systemName: player.isShowingLyrics ? "quote.bubble.fill" : "quote.bubble")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(player.isShowingLyrics ? .white : .white.opacity(0.45))
+                            .font(.system(size: 13, weight: .medium))
+                            .opacity(player.isShowingLyrics ? 1 : 0.5)
+                            .contentTransition(.symbolEffect(.replace))
                             .frame(width: 26, height: 26)
-                            .background(
-                                Circle()
-                                    .fill(player.isShowingLyrics ? .white.opacity(0.22) : .white.opacity(0.08))
-                            )
-                            .contentShape(Circle())
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help(player.isShowingLyrics ? "Hide lyrics" : "Show lyrics")
+                    .padding(.leading, -14)
                 }
             }
             .frame(height: art)
@@ -616,27 +580,27 @@ struct MusicExpandedView: View {
                 }
                 ControlButton(action: { player.togglePlay() }) {
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                         .font(.system(size: 27, weight: .medium))
-                         .contentTransition(.symbolEffect(.replace.downUp.wholeSymbol))
-                         .animation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0), value: player.isPlaying)
-                 }
-                 ControlButton(action: { skips.forward += 1; player.skip(forward: true) }) {
-                     SkipGlyph(forward: true, trigger: skips.forward)
-                 }
-                 ControlButton(isActive: output.isShowingVolume, action: {
-                     withAnimation(.spring(Spring(duration: 0.4, bounce: 0.2), blendDuration: 0)) { output.isShowingVolume.toggle() }
-                 }) {
-                     Image(systemName: output.symbol)
-                         .font(.system(size: 17, weight: .medium))
-                         .opacity(output.isShowingVolume ? 1 : 0.5)
-                         .contentTransition(.symbolEffect(.replace))
-                         .animation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0), value: output.symbol)
-                 }
-                 .disabled(!output.canSetVolume)
-             }
-             .frame(height: 30)
-             .padding(.horizontal, -10)
-             if output.isShowingVolume {
+                        .font(.system(size: 27, weight: .medium))
+                        .contentTransition(.symbolEffect(.replace.downUp.wholeSymbol))
+                        .animation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0), value: player.isPlaying)
+                }
+                ControlButton(action: { skips.forward += 1; player.skip(forward: true) }) {
+                    SkipGlyph(forward: true, trigger: skips.forward)
+                }
+                ControlButton(isActive: output.isShowingVolume, action: {
+                    withAnimation(.spring(Spring(duration: 0.4, bounce: 0.2), blendDuration: 0)) { output.isShowingVolume.toggle() }
+                }) {
+                    Image(systemName: output.symbol)
+                        .font(.system(size: 17, weight: .medium))
+                        .opacity(output.isShowingVolume ? 1 : 0.5)
+                        .contentTransition(.symbolEffect(.replace))
+                        .animation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0), value: output.symbol)
+                }
+                .disabled(!output.canSetVolume)
+            }
+            .frame(height: 30)
+            .padding(.horizontal, -10)
+            if output.isShowingVolume {
                 HStack(spacing: 10) {
                     Button { output.toggleMute() } label: {
                         Image(systemName: output.isMuted ? "speaker.slash.fill" : "speaker.fill")
@@ -656,6 +620,8 @@ struct MusicExpandedView: View {
                 .transition(.blurReplace.combined(with: .offset(y: -8)))
             }
         }
+        .frame(width: width)
+        .foregroundStyle(.white)
     }
 
     private func timeLabel(_ seconds: Double, negative: Bool = false) -> some View {
@@ -744,9 +710,8 @@ struct MusicClosedView: View {
 
     var body: some View {
         let shown = player.track ?? lastTrack
-        let text = player.lyrics.activeLineText
-        let hasLyrics = player.allowsLyrics && player.isShowingLyrics && !text.isEmpty
-
+        let line = player.isShowingLyrics ? player.lyrics.line : ""
+        let besideNotch = LabState.hasNotch && !line.isEmpty
         HStack(spacing: 0) {
             if let track = shown {
                 ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: LabState.closedArtRadius)
@@ -754,28 +719,17 @@ struct MusicClosedView: View {
                     .offset(y: LabState.closedArtOffset)
                     .padding(.leading, LabState.closedArtLeading)
                     .frame(width: Self.slot, alignment: .leading)
-
-                if !LabState.hasNotch && hasLyrics {
-                    lyricsLabel(text: text, width: player.lyrics.activeLineWidth, alignment: .center)
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 6)
-                } else {
+                if line.isEmpty || besideNotch {
                     Spacer(minLength: 0)
-                }
-
-                if LabState.hasNotch && hasLyrics {
-                    HStack(spacing: 8) {
-                        lyricsLabel(text: text, width: player.lyrics.activeLineWidth, alignment: .leading)
-                        WaveformView(track: track, spectrum: player.spectrum, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)
-                    }
-                    .padding(.leading, 8)
-                    .padding(.trailing, 9)
-                    .frame(width: Self.slot + player.lyrics.activeLineWidth + 18, alignment: .trailing)
                 } else {
-                    WaveformView(track: track, spectrum: player.spectrum, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)
-                        .padding(.trailing, 9)
-                        .frame(width: Self.slot, alignment: .trailing)
+                    lyric(line).frame(maxWidth: .infinity)
                 }
+                HStack(spacing: 8) {
+                    if besideNotch { lyric(line) }
+                    WaveformView(track: track, spectrum: player.spectrum, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)
+                }
+                .padding(.trailing, 9)
+                .frame(width: Self.slot + (besideNotch ? player.lyrics.lineWidth + 14 : 0), alignment: .trailing)
             }
         }
         .onAppear { lastTrack = player.track }
@@ -784,33 +738,17 @@ struct MusicClosedView: View {
         }
     }
 
-    private func lyricsLabel(text: String, width: CGFloat, alignment: Alignment) -> some View {
-        Color.clear
-            .frame(minWidth: 0, maxWidth: .infinity)
-            .frame(height: 18)
-            .overlay(alignment: alignment) {
-                ZStack(alignment: alignment) {
-                    Text(text)
-                        .font(.system(size: 11.5, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .shadow(color: .white.opacity(0.35), radius: 5, x: 0, y: 0)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.65)
-                        .allowsTightening(true)
-                        .frame(width: width, alignment: alignment)
-                        .id(text)
-                        .transition(.blurReplace(.downUp))
-                }
-            }
-            .clipped()
-            .mask(
-                LinearGradient(stops: [
-                    .init(color: .clear, location: 0),
-                    .init(color: .black, location: 0.15),
-                    .init(color: .black, location: 0.85),
-                    .init(color: .clear, location: 1.0)
-                ], startPoint: .top, endPoint: .bottom)
-            )
-            .animation(.spring(response: 0.45, dampingFraction: 0.82, blendDuration: 0), value: text)
+    private func lyric(_ text: String) -> some View {
+        ZStack {
+            Text(text)
+                .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .id(text)
+                .transition(.blurReplace(.downUp))
+        }
+        .frame(height: 18)
+        .clipped()
     }
 }

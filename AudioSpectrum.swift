@@ -34,8 +34,7 @@ final class AudioSpectrum {
             do {
                 try session.start(pid: target) { [weak self] levels in
                     Task { @MainActor in
-                        guard let self, self.pid == target else { return }
-                        guard zip(self.levels, levels).contains(where: { abs($0 - $1) >= 0.008 }) else { return }
+                        guard let self, self.pid == target, zip(self.levels, levels).contains(where: { abs($0 - $1) >= 0.008 }) else { return }
                         self.levels = levels
                     }
                 }
@@ -141,10 +140,10 @@ private final class SpectrumAnalyzer: @unchecked Sendable {
     private let window: [Float]
     private let edges: [Int]
     private var pending: [Float] = []
-    private var windowed: [Float]
-    private var real: [Float]
-    private var imag: [Float]
-    private var magnitudes: [Float]
+    private var windowed = [Float](repeating: 0, count: 1024)
+    private var real = [Float](repeating: 0, count: 512)
+    private var imag = [Float](repeating: 0, count: 512)
+    private var magnitudes = [Float](repeating: 0, count: 512)
     private var smoothed: [Float]
     private var ceiling: [Float]
     private var floor: [Float]
@@ -155,11 +154,6 @@ private final class SpectrumAnalyzer: @unchecked Sendable {
         guard let setup = vDSP_create_fftsetup(10, FFTRadix(kFFTRadix2)) else { fatalError("vDSP FFT setup failed") }
         self.setup = setup
         window = vDSP.window(ofType: Float.self, usingSequence: .hanningDenormalized, count: 1024, isHalfWindow: false)
-        pending.reserveCapacity(2048)
-        windowed = [Float](repeating: 0, count: 1024)
-        real = [Float](repeating: 0, count: 512)
-        imag = [Float](repeating: 0, count: 512)
-        magnitudes = [Float](repeating: 0, count: 512)
         let binHz = sampleRate / 1024
         edges = [Float(30), 150, 600, 2_500, 12_000].map { min(511, max(1, Int(($0 / binHz).rounded()))) }
         smoothed = [Float](repeating: 0, count: bands)
@@ -171,19 +165,15 @@ private final class SpectrumAnalyzer: @unchecked Sendable {
     deinit { vDSP_destroy_fftsetup(setup) }
 
     func process(_ samples: UnsafeBufferPointer<Float>, channels: Int) -> [Float]? {
-        let invChannels = 1.0 / Float(channels)
-        var idx = 0
-        while idx + channels <= samples.count {
+        stride(from: 0, to: samples.count - channels + 1, by: channels).forEach { i in
             var sum: Float = 0
-            for c in 0..<channels { sum += samples[idx + c] }
-            pending.append(sum * invChannels)
-            idx += channels
+            for c in 0..<channels { sum += samples[i + c] }
+            pending.append(sum / Float(channels))
         }
         guard pending.count >= n else { return nil }
-        pending.withUnsafeBufferPointer { buf in
-            vDSP_vmul(buf.baseAddress! + (buf.count - n), 1, window, 1, &windowed, 1, vDSP_Length(n))
-        }
+        pending.withUnsafeBufferPointer { vDSP_vmul($0.baseAddress! + $0.count - n, 1, window, 1, &windowed, 1, vDSP_Length(n)) }
         pending.removeFirst(max(0, pending.count - n / 2))
+
         real.withUnsafeMutableBufferPointer { r in
             imag.withUnsafeMutableBufferPointer { im in
                 var split = DSPSplitComplex(realp: r.baseAddress!, imagp: im.baseAddress!)
