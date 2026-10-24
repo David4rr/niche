@@ -101,14 +101,19 @@ private enum LRCLIB {
         var titles = [title]
         let base = strip(version, from: title.components(separatedBy: " - ")[0])
         if !base.isEmpty, base != title { titles.append(base) }
+        var artists = [artist]
+        let lead = artist.split(separator: #/\s*(,|&|\sx\s|\sfeat\.?\s|\sft\.\s|\swith\s)\s*/#.ignoresCase(), maxSplits: 1).first.map(String.init)
+        if let lead, lead != artist { artists.append(lead) }
 
-        for name in titles {
+        for (name, artist) in titles.flatMap({ name in artists.map { (name, $0) } }) {
             var query = ["track_name": name, "artist_name": artist]
             if duration > 1 { query["duration"] = String(Int(duration)) }
             if let item = await json("get", query) as? [String: Any], let found = parse(item) { return found }
             let results = await json("search", ["q": artist.isEmpty ? name : "\(artist) \(name)"]) as? [[String: Any]]
-            let best = results?.compactMap { item in parse(item).map { ($0, score(item, title: name, artist: artist, duration: duration)) } }
-                .max { $0.1 < $1.1 }
+            let best = results?.compactMap { item in
+                score(item, title: name, artist: artist, duration: duration).flatMap { score in parse(item).map { ($0, score) } }
+            }
+            .max { $0.1 < $1.1 }
             if let best { return best.0 }
         }
         return .missing
@@ -134,9 +139,12 @@ private enum LRCLIB {
         }
     }
 
-    private static func score(_ item: [String: Any], title: String, artist: String, duration: Double) -> Int {
+    private static func score(_ item: [String: Any], title: String, artist: String, duration: Double) -> Int? {
         var score = (item["syncedLyrics"] as? String)?.isEmpty == false ? 1000 : 0
-        if duration > 0, let length = item["duration"] as? Double { score -= Int(abs(length - duration) * 50) }
+        if duration > 0, let length = item["duration"] as? Double {
+            guard abs(length - duration) <= 10 else { return nil }
+            score -= Int(abs(length - duration) * 50)
+        }
         for (field, want) in [("trackName", title.lowercased()), ("artistName", artist.lowercased())] {
             guard let have = (item[field] as? String)?.lowercased(), !have.isEmpty, !want.isEmpty else { continue }
             score += have == want ? 500 : have.contains(want) || want.contains(have) ? 250 : 0
@@ -158,17 +166,23 @@ private enum LRCLIB {
 
     private static func parseLRC(_ lrc: String) -> [LyricLine] {
         var stamps: [(time: Double, text: String)] = []
+        var offset = 0.0
         for raw in lrc.split(whereSeparator: \.isNewline) {
             var rest = raw.drop { $0.isWhitespace }
             var times: [Double] = []
             while rest.hasPrefix("["), let close = rest.firstIndex(of: "]") {
                 let tag = rest[rest.index(after: rest.startIndex)..<close].split(separator: ":")
-                if tag.count == 2, let minutes = Double(tag[0]), let seconds = Double(tag[1]) { times.append(minutes * 60 + seconds) }
+                let numbers = tag.compactMap { Double($0) }
+                if tag.count == 2, tag[0].lowercased() == "offset", let ms = Double(tag[1]) { offset = ms / 1000 }
+                if numbers.count == tag.count, (2...3).contains(tag.count) {
+                    times.append(numbers[0] * 60 + numbers[1] + (tag.count == 3 ? numbers[2] / 100 : 0))
+                }
                 rest = rest[rest.index(after: close)...]
             }
-            let text = rest.trimmingCharacters(in: .whitespaces)
+            let text = rest.replacing(#/<\d+:\d+([.:]\d+)?>/#, with: "").trimmingCharacters(in: .whitespaces)
             stamps += times.map { ($0, text) }
         }
+        stamps = stamps.map { (max(0, $0.time - offset), $0.text) }
         stamps.sort { $0.time < $1.time }
         return stamps.indices.map { i in
             let (time, text) = stamps[i]
@@ -263,7 +277,7 @@ private struct LyricRow: View {
                 .foregroundStyle(.white.opacity(opacity))
                 .blur(radius: blur)
                 .lineLimit(2)
-                .minimumScaleFactor(0.85)
+                .minimumScaleFactor(0.7)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(height: 36)
                 .padding(.horizontal, 10)

@@ -308,7 +308,7 @@ final class LabState {
     }
 
     func pick(_ item: ClipboardHistory.Item) {
-        clipboard.copy(item)
+        clipboard.copy(clipboard.marked.isEmpty ? [item] : clipboard.markedItems)
         setOpen(false)
         guard clipboard.pastesOnPick && AXIsProcessTrusted() else {
             liveActivities.copied(icon: item.app, image: item.image, color: Self.color(for: item), symbol: Self.symbol(for: item.kind))
@@ -329,17 +329,20 @@ final class LabState {
         guard !items.isEmpty else { return setOpen(false) }
         let columns = 5
         var selection = clipboard.selection
+        let current = items[min(selection, items.count - 1)]
+        if event.modifierFlags.contains(.command) && Int(event.keyCode) == kVK_ANSI_A { return clipboard.markAll() }
         switch Int(event.keyCode) {
-        case kVK_Escape: return setOpen(false)
-        case kVK_Return, kVK_ANSI_KeypadEnter: return pick(items[min(selection, items.count - 1)])
-        case kVK_Delete, kVK_ForwardDelete: return clipboard.remove(items[min(selection, items.count - 1)])
+        case kVK_Escape: return clipboard.marked.isEmpty ? setOpen(false) : clipboard.unmark()
+        case kVK_Space: return clipboard.mark(current)
+        case kVK_Return, kVK_ANSI_KeypadEnter: return pick(current)
+        case kVK_Delete, kVK_ForwardDelete: return clipboard.remove(current)
         case kVK_LeftArrow: selection -= 1
         case kVK_RightArrow: selection += 1
         case kVK_UpArrow: selection -= columns
         case kVK_DownArrow: selection += columns
         default:
             if let digit = event.charactersIgnoringModifiers.flatMap(Int.init), (1...9).contains(digit), digit <= items.count {
-                pick(items[digit - 1])
+                clipboard.marked.isEmpty ? pick(items[digit - 1]) : clipboard.mark(items[digit - 1])
             }
             return
         }
@@ -498,7 +501,7 @@ struct NicheView: View {
                         .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.12)),
                                                 removal: .opacity.animation(.easeOut(duration: 0.1))))
                 } else if lab.isDropTarget {
-                    ClipboardDropZone()
+                    ClipboardDropZone(item: lab.clipboard.dropping)
                         .padding(.top, LabState.hardwareNotch.height)
                         .frame(width: size.width, height: size.height, alignment: .top)
                         .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.12)),

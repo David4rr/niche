@@ -34,7 +34,7 @@ final class AudioSpectrum {
             do {
                 try session.start(pid: target) { [weak self] levels in
                     Task { @MainActor in
-                        guard let self, self.pid == target else { return }
+                        guard let self, self.pid == target, zip(self.levels, levels).contains(where: { abs($0 - $1) >= 0.008 }) else { return }
                         self.levels = levels
                     }
                 }
@@ -140,6 +140,10 @@ private final class SpectrumAnalyzer: @unchecked Sendable {
     private let window: [Float]
     private let edges: [Int]
     private var pending: [Float] = []
+    private var windowed = [Float](repeating: 0, count: 1024)
+    private var real = [Float](repeating: 0, count: 512)
+    private var imag = [Float](repeating: 0, count: 512)
+    private var magnitudes = [Float](repeating: 0, count: 512)
     private var smoothed: [Float]
     private var ceiling: [Float]
     private var floor: [Float]
@@ -167,13 +171,9 @@ private final class SpectrumAnalyzer: @unchecked Sendable {
             pending.append(sum / Float(channels))
         }
         guard pending.count >= n else { return nil }
-        let frame = Array(pending.suffix(n))
+        pending.withUnsafeBufferPointer { vDSP_vmul($0.baseAddress! + $0.count - n, 1, window, 1, &windowed, 1, vDSP_Length(n)) }
         pending.removeFirst(max(0, pending.count - n / 2))
 
-        var windowed = vDSP.multiply(frame, window)
-        var real = [Float](repeating: 0, count: n / 2)
-        var imag = [Float](repeating: 0, count: n / 2)
-        var magnitudes = [Float](repeating: 0, count: n / 2)
         real.withUnsafeMutableBufferPointer { r in
             imag.withUnsafeMutableBufferPointer { im in
                 var split = DSPSplitComplex(realp: r.baseAddress!, imagp: im.baseAddress!)
@@ -203,7 +203,7 @@ private final class SpectrumAnalyzer: @unchecked Sendable {
             smoothed[b] += (level - smoothed[b]) * (level > smoothed[b] ? 0.75 : 0.22)
         }
         let now = CACurrentMediaTime()
-        guard now - lastPublish >= 1.0 / 60 else { return nil }
+        guard now - lastPublish >= 1.0 / 24 else { return nil }
         lastPublish = now
         return smoothed
     }

@@ -22,13 +22,15 @@ final class ClipboardHistory {
     }
 
     private(set) var items: [Item] = []
+    private(set) var marked: [UUID] = []
+    private(set) var dropping: Item?
     var selection = 0
     private(set) var isKeyboard = false
 
     var isOn: Bool {
         didSet {
             UserDefaults.standard.set(isOn, forKey: "clipboard")
-            if !isOn { items.removeAll() }
+            if !isOn { items.removeAll(); marked.removeAll() }
         }
     }
     var limit: Int {
@@ -101,9 +103,7 @@ final class ClipboardHistory {
         let front = NSWorkspace.shared.frontmostApplication
         let app = front?.icon.map { Self.thumbnail($0, side: 40) }, appName = front?.localizedName
         if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
-            let names = urls.map(\.lastPathComponent).joined(separator: ", ")
-            return Item(kind: .files, text: names, image: Self.thumbnail(NSWorkspace.shared.icon(forFile: urls[0].path), side: 96), imageData: nil, imageType: nil, files: urls,
-                        app: app, appName: appName, signature: urls.hashValue)
+            return Self.fileItem(urls, app: app, appName: appName)
         }
         if let string = board.string(forType: .string), !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -126,6 +126,15 @@ final class ClipboardHistory {
         return nil
     }
 
+    private static func fileItem(_ urls: [URL], app: NSImage?, appName: String?) -> Item {
+        Item(kind: .files, text: urls.map(\.lastPathComponent).joined(separator: ", "), image: thumbnail(NSWorkspace.shared.icon(forFile: urls[0].path), side: 96),
+             imageData: nil, imageType: nil, files: urls, app: app, appName: appName, signature: urls.hashValue)
+    }
+
+    func preview(_ board: NSPasteboard?) {
+        dropping = board.flatMap(read)
+    }
+
     func take(_ board: NSPasteboard) -> Bool {
         guard isOn, let items = board.pasteboardItems, !items.isEmpty else { return false }
         let copies = items.map { item in
@@ -138,7 +147,15 @@ final class ClipboardHistory {
         let general = NSPasteboard.general
         general.clearContents()
         general.writeObjects(copies)
-        poll()
+        guard let dropped = dropping, dropped.files.count > 1 else {
+            poll()
+            return true
+        }
+        lastChange = general.changeCount
+        for url in dropped.files.reversed() {
+            insert(Self.fileItem([url], app: dropped.app, appName: dropped.appName))
+        }
+        onCopied?(self.items[0])
         return true
     }
 
@@ -150,35 +167,63 @@ final class ClipboardHistory {
         }
     }
 
-    func copy(_ item: Item) {
+    func copy(_ chosen: [Item]) {
         let board = NSPasteboard.general
         board.clearContents()
-        switch item.kind {
-        case .files: board.writeObjects(item.files as [NSURL])
-        case .image: if let data = item.imageData, let type = item.imageType { board.setData(data, forType: type) }
-        case .text, .link, .color: board.setString(item.text, forType: .string)
+        if chosen.count == 1, let item = chosen.first {
+            switch item.kind {
+            case .files: board.writeObjects(item.files as [NSURL])
+            case .image: if let data = item.imageData, let type = item.imageType { board.setData(data, forType: type) }
+            case .text, .link, .color: board.setString(item.text, forType: .string)
+            }
+        } else if chosen.allSatisfy({ $0.kind == .files }) {
+            board.writeObjects(chosen.flatMap(\.files) as [NSURL])
+        } else {
+            board.setString(chosen.filter { $0.kind != .image }.map(\.text).joined(separator: "\n"), forType: .string)
         }
         lastChange = board.changeCount
+        marked.removeAll()
         withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-            items.removeAll { $0.id == item.id }
-            items.insert(item, at: 0)
+            items.removeAll { item in chosen.contains { $0.id == item.id } }
+            items.insert(contentsOf: chosen, at: 0)
         }
+    }
+
+    var markedItems: [Item] {
+        marked.compactMap { id in items.first { $0.id == id } }
+    }
+
+    func mark(_ item: Item) {
+        if let index = marked.firstIndex(of: item.id) { marked.remove(at: index) } else { marked.append(item.id) }
+    }
+
+    func markAll() {
+        marked = items.map(\.id)
+    }
+
+    func unmark() {
+        marked.removeAll()
     }
 
     func remove(_ item: Item) {
         withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
             items.removeAll { $0.id == item.id }
+            marked.removeAll { $0 == item.id }
             selection = min(selection, max(items.count - 1, 0))
         }
     }
 
     func clear() {
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { items.removeAll() }
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+            items.removeAll()
+            marked.removeAll()
+        }
     }
 
     func setKeyboard(_ on: Bool) {
         isKeyboard = on
         selection = 0
+        marked.removeAll()
     }
 
     static func thumbnail(_ image: NSImage, side: CGFloat) -> NSImage {
@@ -208,21 +253,39 @@ final class ClipboardHistory {
 
 struct ClipboardDropZone: View {
     static let height: CGFloat = 40
+    let item: ClipboardHistory.Item?
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "tray.and.arrow.down.fill")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color(red: 0.45, green: 0.85, blue: 0.8))
-                .symbolEffect(.bounce.down, options: .repeat(.periodic(delay: 0.5)))
-            Text("Drop to copy")
+            if let image = item?.image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 16, height: 16)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+            } else {
+                Image(systemName: "tray.and.arrow.down.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.45, green: 0.85, blue: 0.8))
+                    .symbolEffect(.bounce.down, options: .repeat(.periodic(delay: 0.5)))
+            }
+            Text(title)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.85))
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
+        .padding(.horizontal, 10)
         .frame(maxWidth: .infinity)
         .frame(height: 26)
         .background(RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
         .padding(.horizontal, 12)
+    }
+
+    private var title: String {
+        guard let item, item.kind != .image else { return "Drop to copy" }
+        if item.files.count > 1 { return "Drop \(item.files.count) files" }
+        return item.text.split(whereSeparator: \.isNewline).first.map(String.init) ?? item.text
     }
 }
 
@@ -239,6 +302,7 @@ final class DropCatcherView: NSView {
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         guard lab.canDrop else { return [] }
+        lab.clipboard.preview(sender.draggingPasteboard)
         lab.setDropTarget(true)
         return .copy
     }
@@ -249,11 +313,14 @@ final class DropCatcherView: NSView {
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
         lab.setDropTarget(false)
+        lab.clipboard.preview(nil)
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         lab.setDropTarget(false)
-        return lab.clipboard.take(sender.draggingPasteboard)
+        let taken = lab.clipboard.take(sender.draggingPasteboard)
+        lab.clipboard.preview(nil)
+        return taken
     }
 }
 
@@ -291,21 +358,29 @@ struct ClipboardView: View {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         ClipTile(item: item,
                                  number: history.isKeyboard && index < 9 ? index + 1 : nil,
+                                 mark: history.marked.firstIndex(of: item.id).map { $0 + 1 },
                                  isSelected: history.isKeyboard && index == history.selection,
                                  isHovered: hovered == item.id,
+                                 onMark: { history.mark(item) },
                                  onDelete: { history.remove(item) })
                             .frame(width: side, height: 48)
                             .onHover { inside in
                                 if inside { hovered = item.id } else if hovered == item.id { hovered = nil }
                             }
-                            .onTapGesture { onPick(item) }
+                            .onTapGesture {
+                                if history.marked.isEmpty && NSEvent.modifierFlags.isDisjoint(with: [.command, .shift]) {
+                                    onPick(item)
+                                } else {
+                                    history.mark(item)
+                                }
+                            }
                             .transition(.scale(scale: 0.6).combined(with: .opacity))
                     }
                 }
             }
             .frame(height: 48 * 2 + spacing)
             if let focus {
-                ClipCaption(item: focus, isKeyboard: history.isKeyboard) { history.clear() }
+                ClipCaption(item: focus, history: history) { onPick(focus) }
                     .id(focus.id)
                     .transition(.opacity)
             }
@@ -317,20 +392,40 @@ struct ClipboardView: View {
 private struct ClipTile: View {
     let item: ClipboardHistory.Item
     let number: Int?
+    let mark: Int?
     let isSelected: Bool
     let isHovered: Bool
+    let onMark: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
         Color.clear
             .overlay { content }
             .clipped()
-            .background(RoundedRectangle(cornerRadius: 9).fill(.white.opacity(0.07)))
+            .background(RoundedRectangle(cornerRadius: 9).fill(.white.opacity(mark == nil ? 0.07 : 0.14)))
             .clipShape(RoundedRectangle(cornerRadius: 9))
             .overlay(RoundedRectangle(cornerRadius: 9)
-                .strokeBorder(.white.opacity(isSelected ? 0.85 : isHovered ? 0.3 : 0), lineWidth: isSelected ? 1.5 : 1))
+                .strokeBorder(.white.opacity(isSelected || mark != nil ? 0.85 : isHovered ? 0.3 : 0), lineWidth: isSelected || mark != nil ? 1.5 : 1))
+            .overlay(alignment: .topLeading) {
+                if mark != nil || isHovered {
+                    Button(action: onMark) {
+                        Group {
+                            if let mark {
+                                Text("\(mark)").font(.system(size: 8.5, weight: .bold).monospacedDigit()).foregroundStyle(.black)
+                            } else {
+                                Image(systemName: "checkmark").font(.system(size: 7, weight: .bold)).foregroundStyle(.white)
+                            }
+                        }
+                        .frame(width: 14, height: 14)
+                        .background(Circle().fill(mark == nil ? Color(white: 0.25) : .white))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(3)
+                    .transition(.scale(scale: 0.5).combined(with: .opacity))
+                }
+            }
             .overlay(alignment: .bottomTrailing) {
-                if let number {
+                if let number, mark == nil {
                     Text("\(number)")
                         .font(.system(size: 8.5, weight: .bold).monospacedDigit())
                         .foregroundStyle(.black)
@@ -354,9 +449,10 @@ private struct ClipTile: View {
                     .transition(.scale(scale: 0.5).combined(with: .opacity))
                 }
             }
-            .scaleEffect(isHovered || isSelected ? 1.05 : 1)
+            .scaleEffect(isHovered || isSelected || mark != nil ? 1.05 : 1)
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: mark)
             .contentShape(Rectangle())
     }
 
@@ -404,37 +500,61 @@ extension ClipTile {
 
 private struct ClipCaption: View {
     let item: ClipboardHistory.Item
-    let isKeyboard: Bool
-    let onClear: () -> Void
+    let history: ClipboardHistory
+    let onPick: () -> Void
 
     var body: some View {
         HStack(spacing: 6) {
-            if let app = item.app {
-                Image(nsImage: app).resizable().frame(width: 13, height: 13)
-            }
-            Text(item.text.split(whereSeparator: \.isNewline).first.map(String.init) ?? item.text)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.8))
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 4)
-            TimelineView(.periodic(from: .now, by: 30)) { context in
-                Text(Self.age(of: item.date, now: context.date))
-                    .font(.system(size: 10, weight: .medium).monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.4))
-            }
-            if isKeyboard {
-                Text("⏎ paste")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
-            } else {
-                Button("Clear", action: onClear)
+            if !history.marked.isEmpty {
+                Text("\(history.marked.count) selected")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.8))
+                Spacer(minLength: 4)
+                Button(action: onPick) {
+                    Text(history.pastesOnPick ? "Paste ⏎" : "Copy ⏎")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(.white.opacity(0.9)))
+                }
+                .buttonStyle(.plain)
+                Button("Reset") { history.unmark() }
                     .buttonStyle(.plain)
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.5))
+            } else {
+                details
             }
         }
         .frame(height: 14)
+    }
+
+    @ViewBuilder private var details: some View {
+        if let app = item.app {
+            Image(nsImage: app).resizable().frame(width: 13, height: 13)
+        }
+        Text(item.text.split(whereSeparator: \.isNewline).first.map(String.init) ?? item.text)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.white.opacity(0.8))
+            .lineLimit(1)
+            .truncationMode(.middle)
+        Spacer(minLength: 4)
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            Text(Self.age(of: item.date, now: context.date))
+                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                .foregroundStyle(.white.opacity(0.4))
+        }
+        if history.isKeyboard {
+            Text("␣ select  ⏎ paste")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.white.opacity(0.4))
+        } else {
+            Button("Clear") { history.clear() }
+                .buttonStyle(.plain)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.5))
+        }
     }
 
     static func age(of date: Date, now: Date) -> String {

@@ -166,7 +166,8 @@ final class MusicPlayer {
     func tick() {
         guard let track else { return }
         let live = isPlaying ? Date().timeIntervalSince(timestamp) * rate : 0
-        position = min(max(elapsedAtTimestamp + live, 0), track.duration)
+        let next = min(max(elapsedAtTimestamp + live, 0), track.duration)
+        if next != position { position = next }
         if isShowingLyrics { lyrics.sync(position) }
     }
 
@@ -347,8 +348,7 @@ struct ArtworkView: View {
 
 struct WaveformView: View {
     let track: Track
-    let levels: [Float]
-    let isLive: Bool
+    let spectrum: AudioSpectrum
     let isPlaying: Bool
     let barWidth: CGFloat
     let maxHeight: CGFloat
@@ -358,19 +358,21 @@ struct WaveformView: View {
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: Self.tick, paused: isLive || !isPlaying)) { context in
-            let step = UInt64(context.date.timeIntervalSinceReferenceDate / Self.tick)
-            let minHeight: CGFloat = 2.5
-            let heights = levels.indices.map { bar -> CGFloat in
-                let level = isLive ? levels[bar] : simulatedLevel(bar: bar, step: step)
-                let raw = isPlaying ? minHeight + CGFloat(level) * (maxHeight - minHeight) : minHeight
-                return (raw * displayScale).rounded() / displayScale
-            }
-            ArtworkTile(track: track)
-                .blur(radius: 5)
-                .saturation(1.5)
-                .brightness(0.12)
-                .mask {
+        let isLive = spectrum.isEnabled
+        ArtworkTile(track: track)
+            .blur(radius: 5)
+            .saturation(1.5)
+            .brightness(0.12)
+            .mask {
+                TimelineView(.animation(minimumInterval: Self.tick, paused: isLive || !isPlaying)) { context in
+                    let levels = spectrum.levels
+                    let step = UInt64(context.date.timeIntervalSinceReferenceDate / Self.tick)
+                    let minHeight: CGFloat = 2.5
+                    let heights = levels.indices.map { bar -> CGFloat in
+                        let level = isLive ? levels[bar] : simulatedLevel(bar: bar, step: step)
+                        let raw = isPlaying ? minHeight + CGFloat(level) * (maxHeight - minHeight) : minHeight
+                        return (raw * displayScale).rounded() / displayScale
+                    }
                     HStack(alignment: .center, spacing: barWidth * 0.75) {
                         ForEach(heights.indices, id: \.self) { bar in
                             Capsule().frame(width: barWidth, height: heights[bar])
@@ -379,8 +381,8 @@ struct WaveformView: View {
                     .animation(isLive ? .easeOut(duration: 1.0 / 24) : .spring(duration: Self.tick), value: heights)
                     .animation(.easeOut(duration: 0.3), value: isPlaying)
                 }
-                .frame(width: CGFloat(levels.count) * barWidth * 1.75, height: maxHeight)
-        }
+            }
+            .frame(width: CGFloat(AudioSpectrum.bands) * barWidth * 1.75, height: maxHeight)
     }
 
     private func simulatedLevel(bar: Int, step: UInt64) -> Float {
@@ -542,7 +544,7 @@ struct MusicExpandedView: View {
                 }
                 .animation(.spring(Spring(duration: 0.38, bounce: 0.25), blendDuration: 0), value: player.songChangeToken)
                 Spacer(minLength: 0)
-                WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 2.5, maxHeight: 14)
+                WaveformView(track: track, spectrum: player.spectrum, isPlaying: player.isPlaying, barWidth: 2.5, maxHeight: 14)
                 if player.allowsLyrics {
                     Button {
                         withAnimation(.spring(Spring(duration: 0.4, bounce: 0.2), blendDuration: 0)) { player.isShowingLyrics.toggle() }
@@ -724,7 +726,7 @@ struct MusicClosedView: View {
                 }
                 HStack(spacing: 8) {
                     if besideNotch { lyric(line) }
-                    WaveformView(track: track, levels: player.spectrum.levels, isLive: player.spectrum.isEnabled, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)
+                    WaveformView(track: track, spectrum: player.spectrum, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)
                 }
                 .padding(.trailing, 9)
                 .frame(width: Self.slot + (besideNotch ? player.lyrics.lineWidth + 14 : 0), alignment: .trailing)
@@ -742,6 +744,7 @@ struct MusicClosedView: View {
                 .font(.system(size: 11.5, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .id(text)
                 .transition(.blurReplace(.downUp))
         }
