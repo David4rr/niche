@@ -44,17 +44,19 @@ final class AgentMonitor {
     private func refresh() {
         let kinds = enabled
         queue.async { [weak self] in
-            let found = (kinds.contains(.claude) ? Self.claudeSessions() : []) + (kinds.contains(.omp) ? Self.ompSessions() : [])
-            Task { @MainActor in
-                guard let self else { return }
-                let live = found.filter { self.enabled.contains($0.kind) }
-                if !live.isEmpty { self.usage.refresh(kinds: self.enabled) }
-                guard self.sessions != live else { return }
-                let wasWorking = Set(self.sessions.filter { $0.state == .working }.map(\.id))
-                for session in live where session.state == .paused && wasWorking.contains(session.id) {
-                    self.onFinished?(session)
+            autoreleasepool {
+                let found = (kinds.contains(.claude) ? Self.claudeSessions() : []) + (kinds.contains(.omp) ? Self.ompSessions() : [])
+                Task { @MainActor in
+                    guard let self else { return }
+                    let live = found.filter { self.enabled.contains($0.kind) }
+                    if !live.isEmpty { self.usage.refresh(kinds: self.enabled) }
+                    guard self.sessions != live else { return }
+                    let wasWorking = Set(self.sessions.filter { $0.state == .working }.map(\.id))
+                    for session in live where session.state == .paused && wasWorking.contains(session.id) {
+                        self.onFinished?(session)
+                    }
+                    withAnimation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0)) { self.sessions = live }
                 }
-                withAnimation(.spring(Spring(duration: 0.35, bounce: 0.3), blendDuration: 0)) { self.sessions = live }
             }
         }
     }
@@ -264,21 +266,23 @@ final class AgentMonitor {
     }
 
     nonisolated static func run(_ tool: String, _ arguments: [String]) -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: tool)
-        process.arguments = arguments
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-        } catch {
-            NSLog("Niche could not run %@: %@", tool, String(describing: error))
-            return ""
+        autoreleasepool {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: tool)
+            process.arguments = arguments
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+            do {
+                try process.run()
+            } catch {
+                NSLog("Niche could not run %@: %@", tool, String(describing: error))
+                return ""
+            }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return String(decoding: data, as: UTF8.self)
         }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return String(decoding: data, as: UTF8.self)
     }
 }
 

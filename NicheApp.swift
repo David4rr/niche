@@ -511,7 +511,6 @@ struct NicheView: View {
                     }
                         .frame(width: size.width + 2 * 16, height: size.height, alignment: .top)
                         .overlay(alignment: .top) { topRow }
-                        .drawingGroup()
                         .blur(radius: c.isSharp ? 0 : 5)
                         .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.12)),
                                                 removal: .opacity.animation(.easeOut(duration: 0.1))))
@@ -882,7 +881,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             signalSources.append(source)
         }
         playbackTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.lab.player.tick() }
+            MainActor.assumeIsolated { self?.lab.player.tick() }
         }
 
         let update: (NSEvent) -> Void = { [weak self] event in

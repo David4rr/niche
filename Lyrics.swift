@@ -229,15 +229,40 @@ struct LyricsView: View {
         .mask(Self.mask)
     }
 
+    @ViewBuilder
     private func rows(_ lines: [LyricLine], synced: Bool) -> some View {
         let active = player.lyrics.index ?? 0
-        return VStack(alignment: .leading, spacing: 6) {
-            ForEach(lines) { line in
-                LyricRow(text: line.text.isEmpty ? "♪" : line.text,
-                         isActive: synced && line.id == active && player.lyrics.isSinging,
-                         distance: synced ? abs(line.id - active) : 0) {
-                    guard synced, track.duration > 0 else { return }
-                    player.seek(to: line.time / track.duration)
+        if !synced {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(lines) { line in
+                    LyricRow(text: line.text.isEmpty ? "♪" : line.text,
+                             isActive: false,
+                             distance: 0) {
+                        guard track.duration > 0 else { return }
+                        player.seek(to: line.time / track.duration)
+                    }
+                }
+            }
+        } else {
+            let start = max(0, active - 4)
+            let end = min(lines.count - 1, active + 4)
+            let topCount = start
+            let bottomCount = max(0, lines.count - 1 - end)
+
+            VStack(alignment: .leading, spacing: 6) {
+                if topCount > 0 {
+                    Color.clear.frame(height: CGFloat(topCount) * 42 - 6)
+                }
+                ForEach(lines[start...end]) { line in
+                    LyricRow(text: line.text.isEmpty ? "♪" : line.text,
+                             isActive: line.id == active && player.lyrics.isSinging,
+                             distance: min(abs(line.id - active), 4)) {
+                        guard track.duration > 0 else { return }
+                        player.seek(to: line.time / track.duration)
+                    }
+                }
+                if bottomCount > 0 {
+                    Color.clear.frame(height: CGFloat(bottomCount) * 42 - 6)
                 }
             }
         }
@@ -273,9 +298,9 @@ private struct LyricRow: View {
     var body: some View {
         Button(action: seek) {
             Text(text)
-                .font(.system(size: isActive ? 15 : 13.5, weight: isActive ? .bold : .medium, design: .rounded))
+                .font(.system(size: 13.5, weight: isActive ? .bold : .medium, design: .rounded))
+                .scaleEffect(isActive ? 1.08 : 1.0, anchor: .leading)
                 .foregroundStyle(.white.opacity(opacity))
-                .blur(radius: blur)
                 .lineLimit(2)
                 .minimumScaleFactor(0.7)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -296,7 +321,4 @@ private struct LyricRow: View {
         return [0.55, 0.42, 0.2, 0.08][min(distance, 3)]
     }
 
-    private var blur: CGFloat {
-        isActive || isHovered || distance > 3 ? 0 : [0, 0.8, 1.8, 3][distance]
-    }
 }

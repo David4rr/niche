@@ -177,7 +177,7 @@ final class MusicPlayer {
         guard follow != (lyricsTimer != nil) else { return }
         lyricsTimer?.invalidate()
         lyricsTimer = follow ? Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 guard let self else { return }
                 self.lyrics.sync(self.elapsedAtTimestamp + Date().timeIntervalSince(self.timestamp) * self.rate)
             }
@@ -206,13 +206,21 @@ func readLines(from handle: FileHandle, label: String, line: @escaping @Sendable
     DispatchQueue(label: label, qos: .utility).async {
         var buffer = Data()
         while true {
-            let chunk = handle.availableData
-            if chunk.isEmpty { return }
-            buffer.append(chunk)
-            while let end = buffer.firstIndex(of: 0x0A) {
-                line(buffer[buffer.startIndex..<end])
-                buffer.removeSubrange(buffer.startIndex...end)
+            let shouldExit = autoreleasepool { () -> Bool in
+                let chunk = handle.availableData
+                if chunk.isEmpty { return true }
+                buffer.append(chunk)
+                while let end = buffer.firstIndex(of: 0x0A) {
+                    let lineData = Data(buffer[buffer.startIndex..<end])
+                    buffer.removeSubrange(buffer.startIndex...end)
+                    line(lineData)
+                }
+                if buffer.isEmpty {
+                    buffer.removeAll(keepingCapacity: false)
+                }
+                return false
             }
+            if shouldExit { return }
         }
     }
 }
@@ -363,6 +371,7 @@ struct WaveformView: View {
             .blur(radius: 5)
             .saturation(1.5)
             .brightness(0.12)
+            .drawingGroup()
             .mask {
                 TimelineView(.animation(minimumInterval: Self.tick, paused: isLive || !isPlaying)) { context in
                     let levels = spectrum.levels
@@ -409,7 +418,7 @@ struct MarqueeText: View {
         let speed: CGFloat = 28
         let travel = textWidth + gap
         let cycle = Double(travel / speed) + hold
-        TimelineView(.animation(minimumInterval: 1.0 / 120, paused: textWidth <= width)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 60, paused: textWidth <= width)) { context in
             let t = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: max(cycle, 0.001))
             let offset = textWidth > width ? -CGFloat(max(0, t - hold)) * speed : 0
             HStack(spacing: gap) {
@@ -453,6 +462,7 @@ struct ProgressBar: View {
                     .blur(radius: 6)
                     .saturation(1.6)
                     .brightness(0.15)
+                    .drawingGroup()
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .clipped()
                     .mask(alignment: .leading) {

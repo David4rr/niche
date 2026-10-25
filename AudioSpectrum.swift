@@ -165,10 +165,14 @@ private final class SpectrumAnalyzer: @unchecked Sendable {
     deinit { vDSP_destroy_fftsetup(setup) }
 
     func process(_ samples: UnsafeBufferPointer<Float>, channels: Int) -> [Float]? {
-        stride(from: 0, to: samples.count - channels + 1, by: channels).forEach { i in
+        var i = 0
+        let limit = samples.count - channels + 1
+        let invChannels = 1.0 / Float(channels)
+        while i < limit {
             var sum: Float = 0
             for c in 0..<channels { sum += samples[i + c] }
-            pending.append(sum / Float(channels))
+            pending.append(sum * invChannels)
+            i += channels
         }
         guard pending.count >= n else { return nil }
         pending.withUnsafeBufferPointer { vDSP_vmul($0.baseAddress! + $0.count - n, 1, window, 1, &windowed, 1, vDSP_Length(n)) }
