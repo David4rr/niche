@@ -25,6 +25,9 @@ final class NotchScreen {
     }
 
     private static func notch(of screen: NSScreen) -> CGSize? {
+        if UserDefaults.standard.bool(forKey: "simulateNotch") {
+            return CGSize(width: 170, height: 32)
+        }
         guard !UserDefaults.standard.bool(forKey: "simulateNoNotch"),
               let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea else { return nil }
         return CGSize(width: screen.frame.width - left.width - right.width, height: screen.safeAreaInsets.top)
@@ -141,6 +144,7 @@ final class LabState {
     static var closedArtOffset: CGFloat { hasNotch ? -1 : 0 }
     static var closedArtLeading: CGFloat { hasNotch ? 5 : 7 }
     static var closedOffset: CGFloat { hasNotch ? -2 : 0 }
+    static let closedLyricsHeight: CGFloat = 22
     static func closedSize(hasContent: Bool) -> CGSize {
         CGSize(width: hardwareNotch.width + (hasContent ? 2 * MusicClosedView.slot : 0), height: hardwareNotch.height)
     }
@@ -234,7 +238,13 @@ final class LabState {
         if isDropTarget { return Self.dropSize }
         let size = Self.closedSize(hasContent: hasClosedContent)
         let room = closedRoom
-        return CGSize(width: size.width + room.left + room.right + levelRoom, height: size.height)
+        let extraHeight = (LabState.hasNotch && hasClosedLyrics) ? Self.closedLyricsHeight : 0
+        return CGSize(width: size.width + room.left + room.right + levelRoom, height: size.height + extraHeight)
+    }
+
+    var hasClosedLyrics: Bool {
+        !controller.isExpanded && !isDropTarget && lockState == .none && liveActivities.current == nil
+            && shownFeature == .music && player.isShowingLyrics && !player.lyrics.line.isEmpty
     }
 
     var closedRoom: (left: CGFloat, right: CGFloat) {
@@ -242,7 +252,12 @@ final class LabState {
         if shownFeature == nil { return idleArt != nil ? (-5, -MusicClosedView.slot) : (0, 0) }
         if shownFeature == .music && player.isShowingLyrics && player.lyrics.lineWidth > 0 {
             let width = player.lyrics.lineWidth
-            if Self.hasNotch { return (0, width + 14) }
+            if Self.hasNotch {
+                let baseWidth = Self.closedSize(hasContent: true).width
+                let extra = max(0, width + 28 - baseWidth)
+                let half = ceil(extra / 2)
+                return (half, half)
+            }
             let half = ceil(max(0, width + 24 - 100) / 2)
             return (half, half)
         }
@@ -451,7 +466,7 @@ struct NicheView: View {
         let c = lab.controller
         let size = lab.currentSize
         let island = lab.notchStyle == .island && !LabState.hasNotch
-        let radii = c.isRounded || lab.isDropTarget ? (top: 16.0, bottom: 22.0) : (top: 8.0, bottom: island ? size.height / 2 : 12.0)
+        let radii = c.isRounded || lab.isDropTarget ? (top: 16.0, bottom: 22.0) : (top: 8.0, bottom: island ? size.height / 2 : (lab.hasClosedLyrics ? 14.0 : 12.0))
         let outlineWidth = size.width + 2 * radii.top
         let shape = NotchShape(topCornerRadius: radii.top, bottomCornerRadius: radii.bottom, isIsland: island)
 
@@ -525,7 +540,7 @@ struct NicheView: View {
                             MusicClosedView(player: lab.player)
                         }
                     }
-                        .frame(width: LabState.closedSize(hasContent: true).width + lab.closedRoom.left + lab.closedRoom.right, height: LabState.hardwareNotch.height)
+                        .frame(width: LabState.closedSize(hasContent: true).width + lab.closedRoom.left + lab.closedRoom.right, height: size.height, alignment: .top)
                         .modifier(ClosedContentFade(isShown: lab.hasClosedContent))
                         .transition(Self.closedContentTransition(afterClosing: c.isCollapsing || c.isExpanded))
                 }
@@ -579,6 +594,8 @@ struct NicheView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(closedResize, value: lab.hasClosedContent)
+        .animation(closedResize, value: lab.closedRoom.left + lab.closedRoom.right)
+        .animation(closedResize, value: lab.hasClosedLyrics)
     }
 
     private var closedResize: Animation {

@@ -711,25 +711,34 @@ struct MusicClosedView: View {
     var body: some View {
         let shown = player.track ?? lastTrack
         let line = player.isShowingLyrics ? player.lyrics.line : ""
-        let besideNotch = LabState.hasNotch && !line.isEmpty
-        HStack(spacing: 0) {
+        let underNotch = LabState.hasNotch && !line.isEmpty
+
+        VStack(spacing: 0) {
             if let track = shown {
-                ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: LabState.closedArtRadius)
-                    .frame(width: LabState.closedArtSize, height: LabState.closedArtSize)
-                    .offset(y: LabState.closedArtOffset)
-                    .padding(.leading, LabState.closedArtLeading)
-                    .frame(width: Self.slot, alignment: .leading)
-                if line.isEmpty || besideNotch {
-                    Spacer(minLength: 0)
-                } else {
-                    lyric(line).frame(maxWidth: .infinity)
-                }
-                HStack(spacing: 8) {
-                    if besideNotch { lyric(line) }
+                HStack(spacing: 0) {
+                    ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: LabState.closedArtRadius)
+                        .frame(width: LabState.closedArtSize, height: LabState.closedArtSize)
+                        .offset(y: LabState.closedArtOffset)
+                        .padding(.leading, LabState.closedArtLeading)
+                        .frame(width: Self.slot, alignment: .leading)
+                    if line.isEmpty || underNotch {
+                        Spacer(minLength: 0)
+                    } else {
+                        lyric(line).frame(maxWidth: .infinity)
+                    }
                     WaveformView(track: track, spectrum: player.spectrum, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)
+                        .padding(.trailing, 9)
+                        .frame(width: Self.slot, alignment: .trailing)
                 }
-                .padding(.trailing, 9)
-                .frame(width: Self.slot + (besideNotch ? player.lyrics.lineWidth + 14 : 0), alignment: .trailing)
+                .frame(height: LabState.hardwareNotch.height)
+
+                if underNotch {
+                    lyric(line)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 10)
+                        .frame(height: LabState.closedLyricsHeight, alignment: .center)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
         }
         .onAppear { lastTrack = player.track }
