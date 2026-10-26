@@ -21,6 +21,7 @@ final class Lyrics {
     @ObservationIgnored private var task: Task<Void, Never>?
 
     static let lead = 0.28
+    private static let resize = Animation.spring(response: 0.45, dampingFraction: 0.95)
     static let closedFont = NSFont(descriptor: NSFont.systemFont(ofSize: 11.5, weight: .semibold).fontDescriptor.withDesign(.rounded)!, size: 11.5)!
 
     var line: String {
@@ -40,20 +41,21 @@ final class Lyrics {
         guard let track else {
             task?.cancel()
             key = ""
-            state = .idle
-            index = nil
+            withAnimation(Self.resize) {
+                state = .idle
+                index = nil
+            }
             return
         }
         let key = "\(track.artist)|\(track.title)".lowercased()
         guard key != self.key else { return }
         self.key = key
         task?.cancel()
-        index = nil
-        if let cached = cache[key] {
-            state = cached
-            return
+        withAnimation(Self.resize) {
+            index = nil
+            if let cached = cache[key] { state = cached } else { state = .loading }
         }
-        state = .loading
+        guard state == .loading else { return }
         task = Task { [weak self] in
             let result = await LRCLIB.fetch(title: track.title, artist: track.artist, duration: track.duration)
             guard !Task.isCancelled, let self, self.key == key else { return }
@@ -61,7 +63,7 @@ final class Lyrics {
                 if self.cache.count >= 50 { self.cache.removeAll() }
                 self.cache[key] = result
             }
-            self.state = result
+            withAnimation(Self.resize) { self.state = result }
         }
     }
 
@@ -212,14 +214,11 @@ struct LyricsView: View {
                     .foregroundStyle(.white.opacity(0.4))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .loaded(let lines, let synced):
-                if synced {
-                    rows(lines, synced: true)
-                        .offset(y: Self.height * 0.38 - 18 - CGFloat(player.lyrics.index ?? 0) * 42)
-                        .animation(.spring(response: 0.5, dampingFraction: 0.75), value: player.lyrics.index)
-                        .frame(height: Self.height, alignment: .top)
-                } else {
-                    ScrollView(showsIndicators: false) { rows(lines, synced: false).padding(.vertical, 20) }
-                }
+                let active = synced ? player.lyrics.index ?? 0 : min(Int(player.position / max(track.duration, 1) * Double(lines.count)), lines.count - 1)
+                rows(lines, active: active, synced: synced)
+                    .offset(y: Self.height * 0.38 - 18 - CGFloat(active) * 42)
+                    .animation(.spring(response: 0.5, dampingFraction: 0.75), value: active)
+                    .frame(height: Self.height, alignment: .top)
             }
         }
         .transition(.opacity)
@@ -229,18 +228,19 @@ struct LyricsView: View {
         .mask(Self.mask)
     }
 
-    private func rows(_ lines: [LyricLine], synced: Bool) -> some View {
-        let active = player.lyrics.index ?? 0
+    private func rows(_ lines: [LyricLine], active: Int, synced: Bool) -> some View {
+        let start = max(0, active - 4)
         return VStack(alignment: .leading, spacing: 6) {
-            ForEach(lines) { line in
+            ForEach(lines[start...min(lines.count - 1, active + 4)]) { line in
                 LyricRow(text: line.text.isEmpty ? "♪" : line.text,
                          isActive: synced && line.id == active && player.lyrics.isSinging,
-                         distance: synced ? abs(line.id - active) : 0) {
+                         distance: synced ? min(abs(line.id - active), 4) : 0) {
                     guard synced, track.duration > 0 else { return }
                     player.seek(to: line.time / track.duration)
                 }
             }
         }
+        .padding(.top, CGFloat(start) * 42)
     }
 }
 
@@ -275,7 +275,6 @@ private struct LyricRow: View {
             Text(text)
                 .font(.system(size: isActive ? 15 : 13.5, weight: isActive ? .bold : .medium, design: .rounded))
                 .foregroundStyle(.white.opacity(opacity))
-                .blur(radius: blur)
                 .lineLimit(2)
                 .minimumScaleFactor(0.7)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -294,9 +293,5 @@ private struct LyricRow: View {
         if isActive { return 1 }
         if isHovered { return 0.85 }
         return [0.55, 0.42, 0.2, 0.08][min(distance, 3)]
-    }
-
-    private var blur: CGFloat {
-        isActive || isHovered || distance > 3 ? 0 : [0, 0.8, 1.8, 3][distance]
     }
 }

@@ -177,7 +177,7 @@ final class MusicPlayer {
         guard follow != (lyricsTimer != nil) else { return }
         lyricsTimer?.invalidate()
         lyricsTimer = follow ? Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 guard let self else { return }
                 self.lyrics.sync(self.elapsedAtTimestamp + Date().timeIntervalSince(self.timestamp) * self.rate)
             }
@@ -206,13 +206,17 @@ func readLines(from handle: FileHandle, label: String, line: @escaping @Sendable
     DispatchQueue(label: label, qos: .utility).async {
         var buffer = Data()
         while true {
-            let chunk = handle.availableData
-            if chunk.isEmpty { return }
-            buffer.append(chunk)
-            while let end = buffer.firstIndex(of: 0x0A) {
-                line(buffer[buffer.startIndex..<end])
-                buffer.removeSubrange(buffer.startIndex...end)
+            let isOpen = autoreleasepool { () -> Bool in
+                let chunk = handle.availableData
+                buffer.append(chunk)
+                while let end = buffer.firstIndex(of: 0x0A) {
+                    let next = Data(buffer[buffer.startIndex..<end])
+                    buffer.removeSubrange(buffer.startIndex...end)
+                    line(next)
+                }
+                return !chunk.isEmpty
             }
+            if !isOpen { return }
         }
     }
 }
@@ -409,7 +413,7 @@ struct MarqueeText: View {
         let speed: CGFloat = 28
         let travel = textWidth + gap
         let cycle = Double(travel / speed) + hold
-        TimelineView(.animation(minimumInterval: 1.0 / 120, paused: textWidth <= width)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 60, paused: textWidth <= width)) { context in
             let t = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: max(cycle, 0.001))
             let offset = textWidth > width ? -CGFloat(max(0, t - hold)) * speed : 0
             HStack(spacing: gap) {
@@ -521,6 +525,7 @@ struct MusicExpandedView: View {
     private func controls(_ track: Track) -> some View {
         let art: CGFloat = 56
         let waveWidth: CGFloat = 4 * 2.5 * 1.75 + (player.allowsLyrics ? 26 : 0)
+        let textWidth = width - art - waveWidth - 30
         let output = player.output
         return VStack(spacing: 0) {
             HStack(spacing: 14) {
@@ -529,7 +534,7 @@ struct MusicExpandedView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     ZStack(alignment: .leading) {
                         MarqueeText(text: track.title, font: .system(size: 13.5, weight: .semibold),
-                                    width: width - art - waveWidth - 30)
+                                    width: textWidth)
                             .id(player.songChangeToken)
                             .transition(.blurReplace(.downUp))
                     }
@@ -542,6 +547,7 @@ struct MusicExpandedView: View {
                     }
                     .frame(height: 16)
                 }
+                .frame(width: textWidth, alignment: .leading)
                 .animation(.spring(Spring(duration: 0.38, bounce: 0.25), blendDuration: 0), value: player.songChangeToken)
                 Spacer(minLength: 0)
                 WaveformView(track: track, spectrum: player.spectrum, isPlaying: player.isPlaying, barWidth: 2.5, maxHeight: 14)
@@ -711,25 +717,34 @@ struct MusicClosedView: View {
     var body: some View {
         let shown = player.track ?? lastTrack
         let line = player.isShowingLyrics ? player.lyrics.line : ""
-        let besideNotch = LabState.hasNotch && !line.isEmpty
-        HStack(spacing: 0) {
+        let underNotch = LabState.hasNotch && !line.isEmpty
+
+        VStack(spacing: 0) {
             if let track = shown {
-                ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: LabState.closedArtRadius)
-                    .frame(width: LabState.closedArtSize, height: LabState.closedArtSize)
-                    .offset(y: LabState.closedArtOffset)
-                    .padding(.leading, LabState.closedArtLeading)
-                    .frame(width: Self.slot, alignment: .leading)
-                if line.isEmpty || besideNotch {
-                    Spacer(minLength: 0)
-                } else {
-                    lyric(line).frame(maxWidth: .infinity)
-                }
-                HStack(spacing: 8) {
-                    if besideNotch { lyric(line) }
+                HStack(spacing: 0) {
+                    ArtworkView(track: track, token: player.songChangeToken, isPlaying: player.isPlaying, cornerRadius: LabState.closedArtRadius)
+                        .frame(width: LabState.closedArtSize, height: LabState.closedArtSize)
+                        .offset(y: LabState.closedArtOffset)
+                        .padding(.leading, LabState.closedArtLeading)
+                        .frame(width: Self.slot, alignment: .leading)
+                    if line.isEmpty || underNotch {
+                        Spacer(minLength: 0)
+                    } else {
+                        lyric(line).frame(maxWidth: .infinity)
+                    }
                     WaveformView(track: track, spectrum: player.spectrum, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)
+                        .padding(.trailing, 9)
+                        .frame(width: Self.slot, alignment: .trailing)
                 }
-                .padding(.trailing, 9)
-                .frame(width: Self.slot + (besideNotch ? player.lyrics.lineWidth + 14 : 0), alignment: .trailing)
+                .frame(height: LabState.hardwareNotch.height)
+
+                if underNotch {
+                    lyric(line)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 10)
+                        .frame(height: LabState.closedLyricsHeight, alignment: .center)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
         }
         .onAppear { lastTrack = player.track }
