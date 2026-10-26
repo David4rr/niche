@@ -129,14 +129,21 @@ final class MusicPlayer {
         }
         clearTask?.cancel()
         clearTask = nil
+        let wasPlaying = isPlaying
         isPlaying = snapshot.isPlaying
         if let shuffle = snapshot.shuffleMode { isShuffled = shuffle != 1 }
-        elapsedAtTimestamp = snapshot.elapsed
-        timestamp = snapshot.timestamp
-        rate = snapshot.rate
-        spectrum.follow(pid: snapshot.isPlaying ? snapshot.pid : nil)
 
         let isNewSong = lastSong.map { !$0.isSameSong(as: next) } ?? false
+        if wasPlaying && !snapshot.isPlaying && !isNewSong {
+            let live = min(max(elapsedAtTimestamp + Date().timeIntervalSince(timestamp) * rate, 0), next.duration)
+            elapsedAtTimestamp = max(snapshot.elapsed, live)
+            timestamp = Date()
+        } else {
+            elapsedAtTimestamp = snapshot.elapsed
+            timestamp = snapshot.timestamp
+        }
+        rate = snapshot.rate
+        spectrum.follow(pid: snapshot.isPlaying ? snapshot.pid : nil)
         if isNewSong {
             if isShowingLyrics { lyrics.load(next) }
             if next.artwork == nil {
