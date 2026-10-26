@@ -90,15 +90,13 @@ final class ClipboardHistory {
     }
 
     private func poll() {
-        autoreleasepool {
-            let board = NSPasteboard.general
-            guard board.changeCount != lastChange else { return }
-            lastChange = board.changeCount
-            guard isOn, let types = board.types, !types.contains(where: { Self.skipped.contains($0.rawValue) }) else { return }
-            guard let item = read(board) else { return }
-            insert(item)
-            onCopied?(item)
-        }
+        let board = NSPasteboard.general
+        guard board.changeCount != lastChange else { return }
+        lastChange = board.changeCount
+        guard isOn, let types = board.types, !types.contains(where: { Self.skipped.contains($0.rawValue) }) else { return }
+        guard let item = read(board) else { return }
+        insert(item)
+        onCopied?(item)
     }
 
     private func read(_ board: NSPasteboard) -> Item? {

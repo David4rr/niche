@@ -25,9 +25,6 @@ final class NotchScreen {
     }
 
     private static func notch(of screen: NSScreen) -> CGSize? {
-        if UserDefaults.standard.bool(forKey: "simulateNotch") {
-            return CGSize(width: 170, height: 32)
-        }
         guard !UserDefaults.standard.bool(forKey: "simulateNoNotch"),
               let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea else { return nil }
         return CGSize(width: screen.frame.width - left.width - right.width, height: screen.safeAreaInsets.top)
@@ -238,12 +235,11 @@ final class LabState {
         if isDropTarget { return Self.dropSize }
         let size = Self.closedSize(hasContent: hasClosedContent)
         let room = closedRoom
-        let extraHeight = (LabState.hasNotch && hasClosedLyrics) ? Self.closedLyricsHeight : 0
-        return CGSize(width: size.width + room.left + room.right + levelRoom, height: size.height + extraHeight)
+        return CGSize(width: size.width + room.left + room.right + levelRoom, height: size.height + (hasClosedLyrics ? Self.closedLyricsHeight : 0))
     }
 
     var hasClosedLyrics: Bool {
-        !controller.isExpanded && !isDropTarget && lockState == .none && liveActivities.current == nil
+        Self.hasNotch && !controller.isExpanded && !isDropTarget && lockState == .none && liveActivities.current == nil
             && shownFeature == .music && player.isShowingLyrics && !player.lyrics.line.isEmpty
     }
 
@@ -252,13 +248,8 @@ final class LabState {
         if shownFeature == nil { return idleArt != nil ? (-5, -MusicClosedView.slot) : (0, 0) }
         if shownFeature == .music && player.isShowingLyrics && player.lyrics.lineWidth > 0 {
             let width = player.lyrics.lineWidth
-            if Self.hasNotch {
-                let baseWidth = Self.closedSize(hasContent: true).width
-                let extra = max(0, width + 28 - baseWidth)
-                let half = ceil(extra / 2)
-                return (half, half)
-            }
-            let half = ceil(max(0, width + 24 - 100) / 2)
+            let room = Self.hasNotch ? Self.closedSize(hasContent: true).width - 28 : 100 - 24
+            let half = ceil(max(0, width - room) / 2)
             return (half, half)
         }
         guard shownFeature == .agents else { return (0, 0) }
@@ -511,6 +502,7 @@ struct NicheView: View {
                     }
                         .frame(width: size.width + 2 * 16, height: size.height, alignment: .top)
                         .overlay(alignment: .top) { topRow }
+                        .drawingGroup()
                         .blur(radius: c.isSharp ? 0 : 5)
                         .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.12)),
                                                 removal: .opacity.animation(.easeOut(duration: 0.1))))
@@ -593,8 +585,6 @@ struct NicheView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(closedResize, value: lab.hasClosedContent)
-        .animation(closedResize, value: lab.closedRoom.left + lab.closedRoom.right)
-        .animation(closedResize, value: lab.hasClosedLyrics)
     }
 
     private var closedResize: Animation {

@@ -206,21 +206,17 @@ func readLines(from handle: FileHandle, label: String, line: @escaping @Sendable
     DispatchQueue(label: label, qos: .utility).async {
         var buffer = Data()
         while true {
-            let shouldExit = autoreleasepool { () -> Bool in
+            let isOpen = autoreleasepool { () -> Bool in
                 let chunk = handle.availableData
-                if chunk.isEmpty { return true }
                 buffer.append(chunk)
                 while let end = buffer.firstIndex(of: 0x0A) {
-                    let lineData = Data(buffer[buffer.startIndex..<end])
+                    let next = Data(buffer[buffer.startIndex..<end])
                     buffer.removeSubrange(buffer.startIndex...end)
-                    line(lineData)
+                    line(next)
                 }
-                if buffer.isEmpty {
-                    buffer.removeAll(keepingCapacity: false)
-                }
-                return false
+                return !chunk.isEmpty
             }
-            if shouldExit { return }
+            if !isOpen { return }
         }
     }
 }
@@ -371,7 +367,6 @@ struct WaveformView: View {
             .blur(radius: 5)
             .saturation(1.5)
             .brightness(0.12)
-            .drawingGroup()
             .mask {
                 TimelineView(.animation(minimumInterval: Self.tick, paused: isLive || !isPlaying)) { context in
                     let levels = spectrum.levels
@@ -462,7 +457,6 @@ struct ProgressBar: View {
                     .blur(radius: 6)
                     .saturation(1.6)
                     .brightness(0.15)
-                    .drawingGroup()
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .clipped()
                     .mask(alignment: .leading) {
@@ -531,6 +525,7 @@ struct MusicExpandedView: View {
     private func controls(_ track: Track) -> some View {
         let art: CGFloat = 56
         let waveWidth: CGFloat = 4 * 2.5 * 1.75 + (player.allowsLyrics ? 26 : 0)
+        let textWidth = width - art - waveWidth - 30
         let output = player.output
         return VStack(spacing: 0) {
             HStack(spacing: 14) {
@@ -539,7 +534,7 @@ struct MusicExpandedView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     ZStack(alignment: .leading) {
                         MarqueeText(text: track.title, font: .system(size: 13.5, weight: .semibold),
-                                    width: width - art - waveWidth - 30)
+                                    width: textWidth)
                             .id(player.songChangeToken)
                             .transition(.blurReplace(.downUp))
                     }
@@ -552,6 +547,7 @@ struct MusicExpandedView: View {
                     }
                     .frame(height: 16)
                 }
+                .frame(width: textWidth, alignment: .leading)
                 .animation(.spring(Spring(duration: 0.38, bounce: 0.25), blendDuration: 0), value: player.songChangeToken)
                 Spacer(minLength: 0)
                 WaveformView(track: track, spectrum: player.spectrum, isPlaying: player.isPlaying, barWidth: 2.5, maxHeight: 14)
