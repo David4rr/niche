@@ -1,5 +1,15 @@
 # changelog
 
+## 0.6.9.3
+
+- memory leak fixed: the now playing reader never let go of what it read, so every song change, pause or artwork update stayed in memory. a copy left running for 32 hours had grown to 89 mb, and 60 quick song changes took 0.6.9.2 from 27 mb to 132 mb. the same test now goes from 23 mb to 24 mb. the focus and headphones readers had the same leak and are fixed too. thanks @David4rr.
+- on macs with a camera notch, the current lyric now sits on a small shelf under the camera instead of pushing the notch out to the right.
+- the lyrics panel only builds the lines around the current one instead of the whole song, and drops the blur on far lines.
+- lyrics without timings show up again and scroll along with the song.
+- the artist name in the player no longer cuts off early.
+- scrolling song titles redraw at 60 fps instead of 120.
+- memory: about 21 mb after launch. the download stays 2.4 mb.
+
 ## 0.6.9.2
 
 - clipboard: pick several items at once with ⌘-click, shift-click, the check on each tile, or space. ⌘a picks all, esc lets go. pasting joins text with new lines, and picked files paste together. thanks @David4rr.
