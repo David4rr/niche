@@ -20,7 +20,7 @@ final class Lyrics {
     @ObservationIgnored private var cache: [String: State] = [:]
     @ObservationIgnored private var task: Task<Void, Never>?
 
-    static let lead = 0.28
+    static let lead = 0.50
     private static let resize = Animation.spring(response: 0.45, dampingFraction: 0.95)
     static let closedFont = NSFont(descriptor: NSFont.systemFont(ofSize: 11.5, weight: .semibold).fontDescriptor.withDesign(.rounded)!, size: 11.5)!
 

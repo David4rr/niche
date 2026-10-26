@@ -85,7 +85,7 @@ final class MusicPlayer {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
         process.arguments = [resources.appendingPathComponent("mediaremote-adapter.pl").path,
                              resources.appendingPathComponent("MediaRemoteAdapter.framework").path,
-                             "stream", "--no-diff", "--debounce=50"]
+                             "stream", "--no-diff", "--debounce=50", "--micros"]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
@@ -137,17 +137,20 @@ final class MusicPlayer {
         spectrum.follow(pid: snapshot.isPlaying ? snapshot.pid : nil)
 
         let isNewSong = lastSong.map { !$0.isSameSong(as: next) } ?? false
-        if isNewSong && next.artwork == nil {
-            if pendingSong.map({ !$0.isSameSong(as: next) }) ?? true {
-                pendingDeadline?.cancel()
-                pendingDeadline = Task { [weak self] in
-                    try? await Task.sleep(for: .seconds(0.8))
-                    guard !Task.isCancelled, let self, let held = self.pendingSong else { return }
-                    self.commit(held)
+        if isNewSong {
+            if isShowingLyrics { lyrics.load(next) }
+            if next.artwork == nil {
+                if pendingSong.map({ !$0.isSameSong(as: next) }) ?? true {
+                    pendingDeadline?.cancel()
+                    pendingDeadline = Task { [weak self] in
+                        try? await Task.sleep(for: .seconds(0.8))
+                        guard !Task.isCancelled, let self, let held = self.pendingSong else { return }
+                        self.commit(held)
+                    }
                 }
+                pendingSong = next
+                return
             }
-            pendingSong = next
-            return
         }
         commit(next)
     }
@@ -176,12 +179,18 @@ final class MusicPlayer {
         let follow = isShowingLyrics && isPlaying
         guard follow != (lyricsTimer != nil) else { return }
         lyricsTimer?.invalidate()
-        lyricsTimer = follow ? Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.lyrics.sync(self.elapsedAtTimestamp + Date().timeIntervalSince(self.timestamp) * self.rate)
+        if follow {
+            let timer = Timer(timeInterval: 0.08, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.lyrics.sync(self.elapsedAtTimestamp + Date().timeIntervalSince(self.timestamp) * self.rate)
+                }
             }
-        } : nil
+            RunLoop.main.add(timer, forMode: .common)
+            lyricsTimer = timer
+        } else {
+            lyricsTimer = nil
+        }
     }
 
     func togglePlay() { _ = send(2, nil) }
@@ -244,15 +253,16 @@ private struct NowPlayingSnapshot: @unchecked Sendable {
             track = Track(title: title,
                           artist: p["artist"] as? String ?? "",
                           album: p["album"] as? String ?? "",
-                          duration: p["duration"] as? Double ?? 0,
+                          duration: (p["durationMicros"] as? Double).map { $0 / 1_000_000 } ?? p["duration"] as? Double ?? 0,
                           artwork: Self.cachedArtwork.image,
                           artworkKey: key)
         } else {
             track = nil
         }
         isPlaying = p["playing"] as? Bool ?? false
-        elapsed = p["elapsedTime"] as? Double ?? 0
-        timestamp = (p["timestamp"] as? String).flatMap { Self.iso.date(from: $0) } ?? Date()
+        elapsed = (p["elapsedTimeMicros"] as? Double).map { $0 / 1_000_000 } ?? p["elapsedTime"] as? Double ?? 0
+        timestamp = (p["timestampEpochMicros"] as? Double).map { Date(timeIntervalSince1970: $0 / 1_000_000) }
+            ?? (p["timestamp"] as? String).flatMap { Self.iso.date(from: $0) } ?? Date()
         rate = p["playbackRate"] as? Double ?? 1
         shuffleMode = p["shuffleMode"] as? Int
         pid = (p["processIdentifier"] as? Int).map { pid_t($0) }
