@@ -77,6 +77,10 @@ final class MusicPlayer {
         self.send = unsafeBitCast(send, to: (@convention(c) (Int, AnyObject?) -> Bool).self)
         self.setElapsed = unsafeBitCast(setElapsed, to: (@convention(c) (Double) -> Void).self)
         self.setShuffle = unsafeBitCast(setShuffle, to: (@convention(c) (Int) -> Void).self)
+        output.onDeviceChange = { [weak self] in
+            guard let self, self.isPlaying else { return }
+            self.spectrum.refresh()
+        }
     }
 
     func start() {
