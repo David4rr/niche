@@ -131,6 +131,7 @@ final class LabState {
     static var hasNotch: Bool { realNotch != nil }
     static var style = NotchStyle.island
     static var isIsland: Bool { !hasNotch && style == .island }
+    static var usesLyricsShelf: Bool { hasNotch || style == .notch }
     static var topGap: CGFloat { isIsland ? 3 : 0 }
     static var hardwareNotch: CGSize {
         if let realNotch { return realNotch }
@@ -254,13 +255,21 @@ final class LabState {
     }
 
     var hasClosedLyrics: Bool {
-        !controller.isExpanded && !isDropTarget && lockState == .none && liveActivities.current == nil
+        Self.usesLyricsShelf && !controller.isExpanded && !isDropTarget && lockState == .none && liveActivities.current == nil
             && shownFeature == .music && player.isShowingLyrics && !player.lyrics.line.isEmpty
     }
 
     var closedRoom: (left: CGFloat, right: CGFloat) {
         guard !controller.isExpanded, !isDropTarget, lockState == .none, liveActivities.current == nil else { return (0, 0) }
         if shownFeature == nil { return idleArt != nil ? (-5, -MusicClosedView.slot) : (0, 0) }
+        if shownFeature == .music && player.isShowingLyrics && !Self.usesLyricsShelf {
+            let line = player.lyrics.line
+            guard !line.isEmpty, line != "♪" else { return (0, 0) }
+            let nat = ceil((line as NSString).size(withAttributes: [.font: Lyrics.closedFont]).width)
+            let extra = min(max(0, nat - 100), 40)
+            let half = ceil(extra / 2)
+            return (half, half)
+        }
         guard shownFeature == .agents else { return (0, 0) }
         let kinds = AgentKind.allCases.filter { !agents.sessions(of: $0).isEmpty }.count
         guard kinds > 1 else { return (0, 0) }
