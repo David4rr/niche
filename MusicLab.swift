@@ -758,7 +758,7 @@ struct MusicClosedView: View {
 
                 if hasLyrics {
                     lyric(line, isTwoRows: isTwoRows)
-                        .frame(maxWidth: .infinity, alignment: (isTwoRows || line != "♪") ? .leading : .center)
+                        .frame(maxWidth: .infinity, alignment: isTwoRows ? .leading : .center)
                         .padding(.horizontal, 10)
                         .frame(height: isTwoRows ? 34 : 22, alignment: .center)
                         .transition(.opacity.combined(with: .move(edge: .top)))
@@ -778,13 +778,13 @@ struct MusicClosedView: View {
             Text(text)
                 .font(.system(size: 11.5, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white)
-                .multilineTextAlignment(.leading)
+                .multilineTextAlignment(isTwoRows ? .leading : .center)
                 .lineLimit(2)
                 .minimumScaleFactor(0.80)
                 .id(text)
                 .transition(.blurReplace(.downUp))
         }
-        .frame(maxWidth: .infinity, alignment: (isTwoRows || text != "♪") ? .leading : .center)
+        .frame(maxWidth: .infinity, alignment: isTwoRows ? .leading : .center)
         .frame(height: isTwoRows ? 30 : 18)
         .clipped()
     }
