@@ -732,15 +732,16 @@ private struct PressSquash: ButtonStyle {
 
 struct MusicClosedView: View {
     let player: MusicPlayer
+    let lab: LabState
     static let slot: CGFloat = 38
     @State private var lastTrack: Track?
 
     var body: some View {
         let shown = player.track ?? lastTrack
         let line = player.isShowingLyrics ? player.lyrics.line : ""
-        let underNotch = LabState.usesLyricsShelf && !line.isEmpty
-        let isTwoRows = underNotch && player.isShowingLyrics && player.lyrics.isTwoRows(maxWidth: LabState.closedLyricsWidth)
-        let isLongIsland = !underNotch && !line.isEmpty && line != "♪" && (line as NSString).size(withAttributes: [.font: Lyrics.closedFont]).width > 80
+        let underNotch = lab.usesLyricsShelf && !line.isEmpty
+        let isTwoRows = player.isShowingLyrics && player.lyrics.isTwoRows(maxWidth: lab.closedLyricsWidth)
+        let isLeading = isTwoRows
 
         VStack(spacing: 0) {
             if let track = shown {
@@ -753,17 +754,17 @@ struct MusicClosedView: View {
                     if line.isEmpty || underNotch {
                         Spacer(minLength: 0)
                     } else {
-                        lyric(line, isTwoRows: false, isLeading: isLongIsland)
+                        lyric(line, isTwoRows: isTwoRows, isLeading: isLeading)
                             .frame(maxWidth: .infinity)
                     }
                     WaveformView(track: track, spectrum: player.spectrum, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)
                         .padding(.trailing, 9)
                         .frame(width: Self.slot, alignment: .trailing)
                 }
-                .frame(height: LabState.hardwareNotch.height)
+                .frame(height: underNotch ? lab.hardwareNotch.height : (isTwoRows ? 36 : lab.hardwareNotch.height))
 
                 if underNotch {
-                    lyric(line, isTwoRows: isTwoRows, isLeading: isTwoRows)
+                    lyric(line, isTwoRows: isTwoRows, isLeading: isLeading)
                         .frame(maxWidth: .infinity, alignment: isTwoRows ? .leading : .center)
                         .padding(.horizontal, 10)
                         .frame(height: isTwoRows ? 34 : 22, alignment: .center)
@@ -777,6 +778,7 @@ struct MusicClosedView: View {
         }
         .animation(LabState.springAnimation, value: isTwoRows)
         .animation(LabState.springAnimation, value: line)
+        .animation(LabState.springAnimation, value: underNotch)
     }
 
     private func lyric(_ text: String, isTwoRows: Bool, isLeading: Bool) -> some View {
@@ -786,7 +788,7 @@ struct MusicClosedView: View {
                 .foregroundStyle(.white)
                 .multilineTextAlignment(isLeading ? .leading : .center)
                 .lineLimit(isTwoRows ? 2 : 1)
-                .minimumScaleFactor(0.80)
+                .minimumScaleFactor(0.70)
                 .id(text)
                 .transition(.blurReplace(.downUp))
         }

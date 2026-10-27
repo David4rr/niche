@@ -131,10 +131,17 @@ final class LabState {
     static var hasNotch: Bool { realNotch != nil }
     static var style = NotchStyle.island
     static var isIsland: Bool { !hasNotch && style == .island }
+    var isIsland: Bool { !Self.hasNotch && notchStyle == .island }
     static var usesLyricsShelf: Bool { hasNotch || style == .notch }
+    var usesLyricsShelf: Bool { Self.hasNotch || notchStyle == .notch }
     static var topGap: CGFloat { isIsland ? 3 : 0 }
+    var topGap: CGFloat { isIsland ? 3 : 0 }
     static var hardwareNotch: CGSize {
         if let realNotch { return realNotch }
+        return CGSize(width: 120, height: isIsland ? 24 : NSStatusBar.system.thickness)
+    }
+    var hardwareNotch: CGSize {
+        if let real = Self.realNotch { return real }
         return CGSize(width: 120, height: isIsland ? 24 : NSStatusBar.system.thickness)
     }
     static var closedArtSize: CGFloat { hasNotch ? 24 : 18 }
@@ -144,7 +151,10 @@ final class LabState {
     static var closedOffset: CGFloat { hasNotch ? -2 : 0 }
     static let springAnimation = Animation.spring(response: 0.45, dampingFraction: 0.95)
     static var closedLyricsWidth: CGFloat {
-        closedSize(hasContent: true).width - 20
+        usesLyricsShelf ? closedSize(hasContent: true).width - 20 : 160
+    }
+    var closedLyricsWidth: CGFloat {
+        usesLyricsShelf ? Self.closedSize(hasContent: true).width - 20 : 160
     }
     static func closedSize(hasContent: Bool) -> CGSize {
         CGSize(width: hardwareNotch.width + (hasContent ? 2 * MusicClosedView.slot : 0), height: hardwareNotch.height)
@@ -243,30 +253,34 @@ final class LabState {
     }
 
     var isTwoLineClosedLyrics: Bool {
-        player.isShowingLyrics && player.lyrics.isTwoRows(maxWidth: Self.closedLyricsWidth)
+        player.isShowingLyrics && player.lyrics.isTwoRows(maxWidth: closedLyricsWidth)
     }
 
     var closedLyricsHeight: CGFloat {
-        isTwoLineClosedLyrics ? 34 : 22
+        usesLyricsShelf ? (isTwoLineClosedLyrics ? 34 : 22) : (isTwoLineClosedLyrics ? 12 : 0)
     }
 
     var closedHeight: CGFloat {
-        Self.hardwareNotch.height + (hasClosedLyrics ? closedLyricsHeight : 0)
+        hardwareNotch.height + (hasClosedLyrics ? closedLyricsHeight : 0)
     }
-
     var hasClosedLyrics: Bool {
-        Self.usesLyricsShelf && !controller.isExpanded && !isDropTarget && lockState == .none && liveActivities.current == nil
+        !controller.isExpanded && !isDropTarget && lockState == .none && liveActivities.current == nil
             && shownFeature == .music && player.isShowingLyrics && !player.lyrics.line.isEmpty
     }
 
     var closedRoom: (left: CGFloat, right: CGFloat) {
         guard !controller.isExpanded, !isDropTarget, lockState == .none, liveActivities.current == nil else { return (0, 0) }
         if shownFeature == nil { return idleArt != nil ? (-5, -MusicClosedView.slot) : (0, 0) }
-        if shownFeature == .music && player.isShowingLyrics && !Self.usesLyricsShelf {
+        if shownFeature == .music && player.isShowingLyrics && !usesLyricsShelf {
             let line = player.lyrics.line
             guard !line.isEmpty, line != "♪" else { return (0, 0) }
             let nat = ceil((line as NSString).size(withAttributes: [.font: Lyrics.closedFont]).width)
-            let extra = min(max(0, nat - 100), 40)
+            let extra: CGFloat
+            if nat <= 160 {
+                extra = min(max(0, nat - 90) * 0.6, 40)
+            } else {
+                extra = 40 + min((nat - 160) * 0.32, 64)
+            }
             let half = ceil(extra / 2)
             return (half, half)
         }
@@ -475,7 +489,7 @@ struct NicheView: View {
         let c = lab.controller
         let size = lab.currentSize
         let island = lab.notchStyle == .island && !LabState.hasNotch
-        let radii = c.isRounded || lab.isDropTarget ? (top: 16.0, bottom: 22.0) : (top: 8.0, bottom: island ? (lab.hasClosedLyrics ? 16.0 : size.height / 2) : (lab.hasClosedLyrics ? 14.0 : 12.0))
+        let radii = c.isRounded || lab.isDropTarget ? (top: 16.0, bottom: 22.0) : (top: 8.0, bottom: island ? size.height / 2 : (lab.hasClosedLyrics ? 14.0 : 12.0))
         let outlineWidth = size.width + 2 * radii.top
         let shape = NotchShape(topCornerRadius: radii.top, bottomCornerRadius: radii.bottom, isIsland: island)
 
@@ -546,7 +560,8 @@ struct NicheView: View {
                         if closedFeature == .agents || (lab.shownFeature == nil && lab.idleArt != nil) {
                             AgentClosedView(monitor: lab.agents, art: lab.idleArt)
                         } else {
-                            MusicClosedView(player: lab.player)
+                            MusicClosedView(player: lab.player, lab: lab)
+                                .id(lab.notchStyle)
                         }
                     }
                         .frame(width: LabState.closedSize(hasContent: true).width + lab.closedRoom.left + lab.closedRoom.right, height: size.height, alignment: .top)
@@ -576,7 +591,7 @@ struct NicheView: View {
             .scaleEffect(lab.isAside ? 0.6 : 1, anchor: .top)
             .blur(radius: lab.isAside ? 6 : 0)
             .opacity(lab.isAside ? 0 : 1)
-            .padding(.top, LabState.topGap)
+            .padding(.top, lab.topGap)
             .contentShape(Rectangle())
             .onHover { lab.hover($0) }
             .onChange(of: lab.hasOpenableContent) { _, has in if !has { lab.setOpen(false) } }
