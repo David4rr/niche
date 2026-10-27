@@ -141,7 +141,10 @@ final class LabState {
     static var closedArtOffset: CGFloat { hasNotch ? -1 : 0 }
     static var closedArtLeading: CGFloat { hasNotch ? 5 : 7 }
     static var closedOffset: CGFloat { hasNotch ? -2 : 0 }
-    static let closedLyricsHeight: CGFloat = 22
+    static let springAnimation = Animation.spring(response: 0.45, dampingFraction: 0.95)
+    static var closedLyricsWidth: CGFloat {
+        closedSize(hasContent: true).width - 20
+    }
     static func closedSize(hasContent: Bool) -> CGSize {
         CGSize(width: hardwareNotch.width + (hasContent ? 2 * MusicClosedView.slot : 0), height: hardwareNotch.height)
     }
@@ -235,23 +238,29 @@ final class LabState {
         if isDropTarget { return Self.dropSize }
         let size = Self.closedSize(hasContent: hasClosedContent)
         let room = closedRoom
-        return CGSize(width: size.width + room.left + room.right + levelRoom, height: size.height + (hasClosedLyrics ? Self.closedLyricsHeight : 0))
+        return CGSize(width: size.width + room.left + room.right + levelRoom, height: closedHeight)
+    }
+
+    var isTwoLineClosedLyrics: Bool {
+        player.isShowingLyrics && player.lyrics.isTwoRows(maxWidth: Self.closedLyricsWidth)
+    }
+
+    var closedLyricsHeight: CGFloat {
+        isTwoLineClosedLyrics ? 34 : 22
+    }
+
+    var closedHeight: CGFloat {
+        Self.hardwareNotch.height + (hasClosedLyrics ? closedLyricsHeight : 0)
     }
 
     var hasClosedLyrics: Bool {
-        Self.hasNotch && !controller.isExpanded && !isDropTarget && lockState == .none && liveActivities.current == nil
+        !controller.isExpanded && !isDropTarget && lockState == .none && liveActivities.current == nil
             && shownFeature == .music && player.isShowingLyrics && !player.lyrics.line.isEmpty
     }
 
     var closedRoom: (left: CGFloat, right: CGFloat) {
         guard !controller.isExpanded, !isDropTarget, lockState == .none, liveActivities.current == nil else { return (0, 0) }
         if shownFeature == nil { return idleArt != nil ? (-5, -MusicClosedView.slot) : (0, 0) }
-        if shownFeature == .music && player.isShowingLyrics && player.lyrics.lineWidth > 0 {
-            let width = player.lyrics.lineWidth
-            let room = Self.hasNotch ? Self.closedSize(hasContent: true).width - 28 : 100 - 24
-            let half = ceil(max(0, width - room) / 2)
-            return (half, half)
-        }
         guard shownFeature == .agents else { return (0, 0) }
         let kinds = AgentKind.allCases.filter { !agents.sessions(of: $0).isEmpty }.count
         guard kinds > 1 else { return (0, 0) }
@@ -457,7 +466,7 @@ struct NicheView: View {
         let c = lab.controller
         let size = lab.currentSize
         let island = lab.notchStyle == .island && !LabState.hasNotch
-        let radii = c.isRounded || lab.isDropTarget ? (top: 16.0, bottom: 22.0) : (top: 8.0, bottom: island ? size.height / 2 : (lab.hasClosedLyrics ? 14.0 : 12.0))
+        let radii = c.isRounded || lab.isDropTarget ? (top: 16.0, bottom: 22.0) : (top: 8.0, bottom: island ? (lab.hasClosedLyrics ? 16.0 : size.height / 2) : (lab.hasClosedLyrics ? 14.0 : 12.0))
         let outlineWidth = size.width + 2 * radii.top
         let shape = NotchShape(topCornerRadius: radii.top, bottomCornerRadius: radii.bottom, isIsland: island)
 
@@ -545,6 +554,7 @@ struct NicheView: View {
                     .allowsHitTesting(false)
             }
             .frame(width: outlineWidth, height: size.height, alignment: .top)
+            .animation(LabState.springAnimation, value: size)
             .clipShape(shape)
             .background {
                 shape
@@ -588,9 +598,7 @@ struct NicheView: View {
     }
 
     private var closedResize: Animation {
-        lab.hasClosedContent
-            ? .spring(Spring(duration: 0.5, bounce: 0.32), blendDuration: 0)
-            : .spring(response: 0.45, dampingFraction: 0.95)
+        LabState.springAnimation
     }
 
     private static let activityTransition = AnyTransition.asymmetric(

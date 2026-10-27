@@ -21,7 +21,7 @@ final class Lyrics {
     @ObservationIgnored private var task: Task<Void, Never>?
 
     static let lead = 0.50
-    private static let resize = Animation.spring(response: 0.45, dampingFraction: 0.95)
+    static let resize = LabState.springAnimation
     static let closedFont = NSFont(descriptor: NSFont.systemFont(ofSize: 11.5, weight: .semibold).fontDescriptor.withDesign(.rounded)!, size: 11.5)!
 
     var line: String {
@@ -30,11 +30,11 @@ final class Lyrics {
         guard let index, isSinging, !lines[index].text.isEmpty else { return "♪" }
         return lines[index].text
     }
-
-    var lineWidth: CGFloat {
+    func isTwoRows(maxWidth: CGFloat) -> Bool {
         let text = line
-        guard !text.isEmpty else { return 0 }
-        return min(max(ceil((text as NSString).size(withAttributes: [.font: Self.closedFont]).width), 20), 280)
+        guard !text.isEmpty, text != "♪" else { return false }
+        if text.contains("\n") { return true }
+        return ceil((text as NSString).size(withAttributes: [.font: Self.closedFont]).width) > maxWidth
     }
 
     func load(_ track: Track?) {
@@ -73,7 +73,7 @@ final class Lyrics {
         let next = lines.lastIndex { $0.time <= at }
         let singing = next.map { at <= lines[$0].end } ?? true
         guard next != index || singing != isSinging else { return }
-        withAnimation(.spring(response: 0.45, dampingFraction: 0.95)) {
+        withAnimation(LabState.springAnimation) {
             index = next
             isSinging = singing
         }
@@ -200,19 +200,15 @@ struct LyricsView: View {
     let track: Track
     static let height: CGFloat = 140
     private static let mask = LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.16),
-                                                     .init(color: .black, location: 0.84), .init(color: .clear, location: 1)],
-                                             startPoint: .top, endPoint: .bottom)
+                                                     .init(color: .black, location: 0.84), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom)
 
     var body: some View {
         Group {
             switch player.lyrics.state {
-            case .idle, .loading:
-                LyricsSkeleton()
+            case .idle, .loading: LyricsSkeleton()
             case .missing:
-                Text("No lyrics for this song")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Text("No lyrics for this song").font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4)).frame(maxWidth: .infinity, maxHeight: .infinity)
             case .loaded(let lines, let synced):
                 let active = synced ? player.lyrics.index ?? 0 : min(Int(player.position / max(track.duration, 1) * Double(lines.count)), lines.count - 1)
                 rows(lines, active: active, synced: synced)
@@ -232,11 +228,9 @@ struct LyricsView: View {
         let start = max(0, active - 4)
         return VStack(alignment: .leading, spacing: 6) {
             ForEach(lines[start...min(lines.count - 1, active + 4)]) { line in
-                LyricRow(text: line.text.isEmpty ? "♪" : line.text,
-                         isActive: synced && line.id == active && player.lyrics.isSinging,
+                LyricRow(text: line.text.isEmpty ? "♪" : line.text, isActive: synced && line.id == active && player.lyrics.isSinging,
                          distance: synced ? min(abs(line.id - active), 4) : 0) {
-                    guard synced, track.duration > 0 else { return }
-                    player.seek(to: line.time / track.duration)
+                    if synced && track.duration > 0 { player.seek(to: line.time / track.duration) }
                 }
             }
         }
@@ -253,8 +247,7 @@ private struct LyricsSkeleton: View {
             bar(width: 185, height: 16, opacity: isOn ? 0.32 : 0.14)
             bar(width: 115, height: 13, opacity: isOn ? 0.14 : 0.05)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .padding(.leading, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).padding(.leading, 10)
         .onAppear { withAnimation(.easeInOut(duration: 1.1).repeatForever()) { isOn = true } }
     }
 
@@ -290,8 +283,6 @@ private struct LyricRow: View {
     }
 
     private var opacity: Double {
-        if isActive { return 1 }
-        if isHovered { return 0.85 }
-        return [0.55, 0.42, 0.2, 0.08][min(distance, 3)]
+        isActive ? 1 : (isHovered ? 0.85 : [0.55, 0.42, 0.2, 0.08][min(distance, 3)])
     }
 }

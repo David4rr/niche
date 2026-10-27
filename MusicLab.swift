@@ -738,7 +738,8 @@ struct MusicClosedView: View {
     var body: some View {
         let shown = player.track ?? lastTrack
         let line = player.isShowingLyrics ? player.lyrics.line : ""
-        let underNotch = LabState.hasNotch && !line.isEmpty
+        let isTwoRows = player.isShowingLyrics && player.lyrics.isTwoRows(maxWidth: LabState.closedLyricsWidth)
+        let hasLyrics = !line.isEmpty
 
         VStack(spacing: 0) {
             if let track = shown {
@@ -748,22 +749,18 @@ struct MusicClosedView: View {
                         .offset(y: LabState.closedArtOffset)
                         .padding(.leading, LabState.closedArtLeading)
                         .frame(width: Self.slot, alignment: .leading)
-                    if line.isEmpty || underNotch {
-                        Spacer(minLength: 0)
-                    } else {
-                        lyric(line).frame(maxWidth: .infinity)
-                    }
+                    Spacer(minLength: 0)
                     WaveformView(track: track, spectrum: player.spectrum, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)
                         .padding(.trailing, 9)
                         .frame(width: Self.slot, alignment: .trailing)
                 }
                 .frame(height: LabState.hardwareNotch.height)
 
-                if underNotch {
-                    lyric(line)
-                        .frame(maxWidth: .infinity)
+                if hasLyrics {
+                    lyric(line, isTwoRows: isTwoRows)
+                        .frame(maxWidth: .infinity, alignment: (isTwoRows || line != "♪") ? .leading : .center)
                         .padding(.horizontal, 10)
-                        .frame(height: LabState.closedLyricsHeight, alignment: .center)
+                        .frame(height: isTwoRows ? 34 : 22, alignment: .center)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
@@ -772,19 +769,23 @@ struct MusicClosedView: View {
         .onChange(of: player.track) { _, track in
             if let track { lastTrack = track }
         }
+        .animation(LabState.springAnimation, value: isTwoRows)
+        .animation(LabState.springAnimation, value: line)
     }
 
-    private func lyric(_ text: String) -> some View {
+    private func lyric(_ text: String, isTwoRows: Bool) -> some View {
         ZStack {
             Text(text)
                 .font(.system(size: 11.5, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .multilineTextAlignment(.leading)
+                .lineLimit(2)
+                .minimumScaleFactor(0.80)
                 .id(text)
                 .transition(.blurReplace(.downUp))
         }
-        .frame(height: 18)
+        .frame(maxWidth: .infinity, alignment: (isTwoRows || text != "♪") ? .leading : .center)
+        .frame(height: isTwoRows ? 30 : 18)
         .clipped()
     }
 }
