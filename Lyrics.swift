@@ -212,7 +212,7 @@ struct LyricsView: View {
             case .loaded(let lines, let synced):
                 let active = synced ? player.lyrics.index ?? 0 : min(Int(player.position / max(track.duration, 1) * Double(lines.count)), lines.count - 1)
                 rows(lines, active: active, synced: synced)
-                    .offset(y: Self.height * 0.38 - 18 - CGFloat(active) * 42)
+                    .offset(y: Self.height * 0.38 - 19 - CGFloat(active) * 44)
                     .animation(.spring(response: 0.5, dampingFraction: 0.75), value: active)
                     .frame(height: Self.height, alignment: .top)
             }
@@ -234,7 +234,7 @@ struct LyricsView: View {
                 }
             }
         }
-        .padding(.top, CGFloat(start) * 42)
+        .padding(.top, CGFloat(start) * 44)
     }
 }
 
@@ -266,12 +266,13 @@ private struct LyricRow: View {
     var body: some View {
         Button(action: seek) {
             Text(text)
-                .font(.system(size: isActive ? 15 : 13.5, weight: isActive ? .bold : .medium, design: .rounded))
+                .font(.system(size: isActive ? 14.5 : 13.0, weight: isActive ? .bold : .medium, design: .rounded))
                 .foregroundStyle(.white.opacity(opacity))
-                .lineLimit(2)
-                .minimumScaleFactor(0.7)
+                .multilineTextAlignment(.leading)
+                .lineLimit(3)
+                .minimumScaleFactor(0.60)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: 36)
+                .frame(height: 38)
                 .padding(.horizontal, 10)
                 .background(RoundedRectangle(cornerRadius: 9).fill(.white.opacity(isHovered && !isActive ? 0.08 : 0)))
                 .contentShape(Rectangle())

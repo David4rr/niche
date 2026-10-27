@@ -151,7 +151,7 @@ final class LabState {
     static var notchExtra: CGFloat { max(0, hardwareNotch.height - 32) }
     static var openSize: CGSize { CGSize(width: hardwareNotch.width + 160, height: 175 + notchExtra) }
     static var agentsWidth: CGFloat { max(openSize.width + 40, 385) }
-    static let lyricsWidth: CGFloat = 240
+    static let lyricsWidth: CGFloat = 280
     static var dropSize: CGSize { CGSize(width: closedSize(hasContent: true).width + 40, height: hardwareNotch.height + ClipboardDropZone.height) }
 
     var hasClosedContent: Bool { shownFeature != nil || idleArt != nil || lockState != .none || liveActivities.current != nil }
