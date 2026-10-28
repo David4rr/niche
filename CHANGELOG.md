@@ -1,5 +1,9 @@
 # changelog
 
+## 0.6.9.5
+
+- the closed notch sat its artwork and bars too low on macs with a camera notch when lyrics were off, cutting off the bottom of the bars. they're centered again.
+
 ## 0.6.9.4
 
 - the closed notch uses much less cpu while music plays: about 2.5% instead of 10.5%. the little bars beside the artwork now animate in core animation instead of redrawing the whole notch every frame.
