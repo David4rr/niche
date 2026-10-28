@@ -10,7 +10,7 @@ final class OutputDevice {
     private(set) var isMuted = false
     private(set) var canSetVolume = false
     var isShowingVolume = false
-    var onDeviceChange: (() -> Void)?
+    @ObservationIgnored var onDeviceChange: (() -> Void)?
 
     @ObservationIgnored private var device = AudioObjectID(kAudioObjectUnknown)
     @ObservationIgnored private var listeners: [(AudioObjectID, AudioObjectPropertyAddress)] = []

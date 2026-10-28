@@ -3,7 +3,6 @@ import AudioToolbox
 import CoreAudio
 import Foundation
 import QuartzCore
-import os
 
 @MainActor
 @Observable
@@ -46,17 +45,17 @@ final class AudioSpectrum {
         }
     }
 
+    func refresh() {
+        let target = pid
+        guard target > 0 else { return }
+        pid = 0
+        follow(pid: target)
+    }
+
     func stop() {
         pid = 0
         levels = [Float](repeating: 0, count: Self.bands)
         session.queue.async { [session] in session.stop() }
-    }
-
-    func refresh() {
-        guard isEnabled, pid > 0 else { return }
-        let currentPID = pid
-        self.pid = 0
-        follow(pid: currentPID)
     }
 }
 
@@ -66,31 +65,22 @@ private final class TapSession: @unchecked Sendable {
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
     private var ioQueue: DispatchQueue?
-    private let isActive = OSAllocatedUnfairLock(initialState: false)
-
-    deinit {
-        stop()
-    }
 
     func stop() {
-        isActive.withLock { $0 = false }
         if aggregateID != kAudioObjectUnknown {
             AudioDeviceStop(aggregateID, procID)
             if let procID { AudioDeviceDestroyIOProcID(aggregateID, procID) }
+            ioQueue?.sync {}
             AudioHardwareDestroyAggregateDevice(aggregateID)
         }
-        if let ioQueue {
-            ioQueue.sync { }
-        }
+        ioQueue = nil
         if tapID != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tapID) }
         tapID = AudioObjectID(kAudioObjectUnknown)
         aggregateID = AudioObjectID(kAudioObjectUnknown)
         procID = nil
-        ioQueue = nil
     }
 
     func start(pid: pid_t, onLevels: @escaping @Sendable ([Float]) -> Void) throws {
-        stop()
         let process = try Self.read(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyTranslatePIDToProcessObject,
                                     qualifier: pid, as: AudioObjectID.self)
         guard process != kAudioObjectUnknown else { throw TapError.noAudioProcess }
@@ -116,37 +106,24 @@ private final class TapSession: @unchecked Sendable {
         try check(AudioHardwareCreateAggregateDevice(config as CFDictionary, &aggregateID), "create aggregate device")
 
         let format = try Self.read(tapID, kAudioTapPropertyFormat, as: AudioStreamBasicDescription.self)
-        guard format.mFormatID == kAudioFormatLinearPCM, (format.mFormatFlags & kAudioFormatFlagIsFloat) != 0 else {
-            throw TapError.status("unsupported tap format", -1)
-        }
-        let sampleRate = (format.mSampleRate.isFinite && format.mSampleRate > 0) ? Float(format.mSampleRate) : 44100.0
-        let analyzer = SpectrumAnalyzer(bands: AudioSpectrum.bands, sampleRate: sampleRate)
-        let rawChannels = (format.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0 ? 1 : Int(format.mChannelsPerFrame)
-        let interleavedChannels = max(1, rawChannels)
-        let queue = DispatchQueue(label: "niche.spectrum", qos: .userInteractive)
-        self.ioQueue = queue
-        isActive.withLock { $0 = true }
+        guard format.mFormatID == kAudioFormatLinearPCM, format.mFormatFlags & kAudioFormatFlagIsFloat != 0 else { throw TapError.notFloat }
+        let analyzer = SpectrumAnalyzer(bands: AudioSpectrum.bands, sampleRate: Float(format.mSampleRate))
+        let interleavedChannels = (format.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0 ? 1 : Int(format.mChannelsPerFrame)
+        let ioQueue = DispatchQueue(label: "niche.spectrum", qos: .userInteractive)
+        self.ioQueue = ioQueue
 
-        try check(AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, queue) { [weak self] _, input, _, _, _ in
-            guard let self, self.isActive.withLock({ $0 }) else { return }
-            guard Int(bitPattern: input) != 0 else { return }
-            let inputPtr = UnsafeMutablePointer(mutating: input)
-            guard inputPtr.pointee.mNumberBuffers > 0 else { return }
-            let buffers = UnsafeMutableAudioBufferListPointer(inputPtr)
+        try check(AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, ioQueue) { _, input, _, _, _ in
+            let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
             guard let first = buffers.first, let data = first.mData else { return }
-            guard Int(bitPattern: data) & (MemoryLayout<Float>.alignment - 1) == 0 else { return }
-            let byteSize = Int(first.mDataByteSize)
-            let floatCount = byteSize / MemoryLayout<Float>.size
-            guard floatCount >= interleavedChannels else { return }
-            let samples = UnsafeBufferPointer(start: data.assumingMemoryBound(to: Float.self), count: floatCount)
+            let samples = UnsafeBufferPointer(start: data.assumingMemoryBound(to: Float.self),
+                                              count: Int(first.mDataByteSize) / MemoryLayout<Float>.size)
             guard let levels = analyzer.process(samples, channels: interleavedChannels) else { return }
-            guard self.isActive.withLock({ $0 }) else { return }
             onLevels(levels)
         }, "create IO proc")
         try check(AudioDeviceStart(aggregateID, procID), "start aggregate device")
     }
 
-    enum TapError: Error { case noAudioProcess, status(String, OSStatus) }
+    enum TapError: Error { case noAudioProcess, notFloat, status(String, OSStatus) }
 
     private func check(_ status: OSStatus, _ what: String) throws {
         guard status == noErr else { throw TapError.status(what, status) }
@@ -189,8 +166,7 @@ private final class SpectrumAnalyzer: @unchecked Sendable {
         guard let setup = vDSP_create_fftsetup(10, FFTRadix(kFFTRadix2)) else { fatalError("vDSP FFT setup failed") }
         self.setup = setup
         window = vDSP.window(ofType: Float.self, usingSequence: .hanningDenormalized, count: 1024, isHalfWindow: false)
-        let safeRate = (sampleRate.isFinite && sampleRate > 0) ? sampleRate : 44100.0
-        let binHz = max(safeRate / 1024.0, 1.0)
+        let binHz = sampleRate / 1024
         edges = [Float(30), 150, 600, 2_500, 12_000].map { min(511, max(1, Int(($0 / binHz).rounded()))) }
         smoothed = [Float](repeating: 0, count: bands)
         ceiling = [Float](repeating: -30, count: bands)
@@ -201,15 +177,10 @@ private final class SpectrumAnalyzer: @unchecked Sendable {
     deinit { vDSP_destroy_fftsetup(setup) }
 
     func process(_ samples: UnsafeBufferPointer<Float>, channels: Int) -> [Float]? {
-        guard channels > 0, samples.count >= channels, let base = samples.baseAddress else { return nil }
-        let sampleCount = samples.count
-        stride(from: 0, to: sampleCount - channels + 1, by: channels).forEach { i in
+        stride(from: 0, to: samples.count - channels + 1, by: channels).forEach { i in
             var sum: Float = 0
-            for c in 0..<channels { sum += base[i + c] }
+            for c in 0..<channels { sum += samples[i + c] }
             pending.append(sum / Float(channels))
-        }
-        if pending.count > n * 4 {
-            pending.removeFirst(pending.count - n)
         }
         guard pending.count >= n else { return nil }
         pending.withUnsafeBufferPointer { vDSP_vmul($0.baseAddress! + $0.count - n, 1, window, 1, &windowed, 1, vDSP_Length(n)) }
@@ -229,12 +200,7 @@ private final class SpectrumAnalyzer: @unchecked Sendable {
         }
 
         for b in 0..<smoothed.count {
-            guard b + 1 < edges.count else { continue }
-            let lower = edges[b]
-            let upper = max(lower + 1, edges[b + 1])
-            guard lower < magnitudes.count, upper <= magnitudes.count, lower < upper else { continue }
-            let slice = magnitudes[lower..<upper]
-            guard !slice.isEmpty else { continue }
+            let slice = magnitudes[edges[b]..<max(edges[b] + 1, edges[b + 1])]
             let power = slice.reduce(0) { $0 + $1 * $1 } / Float(slice.count) / Float(n * n)
             let db = 10 * log10(max(power, 1e-12))
 
