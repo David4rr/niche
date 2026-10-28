@@ -132,14 +132,15 @@ private enum LRCLIB {
     private static func json(_ path: String, _ query: [String: String]) async -> Any? {
         var components = URLComponents(string: "https://lrclib.net/api/\(path)")!
         components.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
-        var request = URLRequest(url: components.url!, timeoutInterval: 5)
+        guard let url = components.url else { return nil }
+        var request = URLRequest(url: url, timeoutInterval: 5)
         request.setValue(agent, forHTTPHeaderField: "User-Agent")
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard (response as! HTTPURLResponse).statusCode == 200 else { return nil }
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
             return try JSONSerialization.jsonObject(with: data)
         } catch {
-            NSLog("Niche could not reach lrclib: \(error)")
+            NSLog("Niche could not reach lrclib: %@", String(describing: error))
             return nil
         }
     }
@@ -209,13 +210,10 @@ struct LyricsView: View {
     var body: some View {
         Group {
             switch player.lyrics.state {
-            case .idle, .loading:
-                LyricsSkeleton()
+            case .idle, .loading: LyricsSkeleton()
             case .missing:
-                Text("No lyrics for this song")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Text("No lyrics for this song").font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4)).frame(maxWidth: .infinity, maxHeight: .infinity)
             case .loaded(let lines, let synced):
                 let active = synced ? player.lyrics.index ?? 0 : min(Int(player.position / max(track.duration, 1) * Double(lines.count)), lines.count - 1)
                 rows(lines, active: active, synced: synced)
