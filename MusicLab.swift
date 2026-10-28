@@ -495,8 +495,8 @@ final class WaveformLayer: NSView {
         art.contentsScale = window.backingScaleFactor
     }
 
-    override func layout() {
-        super.layout()
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         art.frame = bounds
@@ -860,7 +860,7 @@ struct MusicClosedView: View {
                         .padding(.trailing, 9)
                         .frame(width: Self.slot, alignment: .trailing)
                 }
-                .frame(height: LabState.hardwareNotch.height + (underNotch ? 0 : lab.closedLyricsHeight))
+                .frame(height: LabState.hardwareNotch.height + (lab.usesLyricsShelf ? 0 : lab.closedLyricsHeight))
 
                 if underNotch {
                     lyric(line, twoRows: twoRows)
