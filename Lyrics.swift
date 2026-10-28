@@ -139,7 +139,7 @@ private enum LRCLIB {
             guard (response as! HTTPURLResponse).statusCode == 200 else { return nil }
             return try JSONSerialization.jsonObject(with: data)
         } catch {
-            NSLog("Niche could not reach lrclib: \(error)")
+            NSLog("Niche could not reach lrclib: %@", String(describing: error))
             return nil
         }
     }
