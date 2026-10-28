@@ -1,5 +1,16 @@
 # changelog
 
+## 0.6.9.4
+
+- the closed notch uses much less cpu while music plays: about 2.5% instead of 10.5%. the little bars beside the artwork now animate in core animation instead of redrawing the whole notch every frame.
+- long lyrics wrap onto two rows in the closed notch instead of shrinking or cutting off. the shelf under the camera grows to fit, and on macs without a notch the island grows a little taller and wider. thanks @David4rr.
+- lyrics timing is steadier: the player now reads its position to the microsecond instead of the whole second, which used to put lyrics up to a second early.
+- pausing in spotify no longer makes the progress jump back for a moment.
+- lyrics start loading the moment the song changes, and keep moving while you hover or scroll the notch.
+- the lyrics panel is a bit wider and lets long lines wrap onto three rows.
+- live bars follow you when the output device changes, like when airpods connect. stopping them now waits for the last audio update first, which should fix a rare crash.
+- memory: about 23 mb after launch. the download stays 2.4 mb.
+
 ## 0.6.9.3
 
 - memory leak fixed: the now playing reader never let go of what it read, so every song change, pause or artwork update stayed in memory. a copy left running for 32 hours had grown to 89 mb, and 60 quick song changes took 0.6.9.2 from 27 mb to 132 mb. the same test now goes from 23 mb to 24 mb. the focus and headphones readers had the same leak and are fixed too. thanks @David4rr.
