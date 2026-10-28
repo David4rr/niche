@@ -45,6 +45,13 @@ final class AudioSpectrum {
         }
     }
 
+    func refresh() {
+        let target = pid
+        guard target > 0 else { return }
+        pid = 0
+        follow(pid: target)
+    }
+
     func stop() {
         pid = 0
         levels = [Float](repeating: 0, count: Self.bands)
@@ -57,13 +64,16 @@ private final class TapSession: @unchecked Sendable {
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
+    private var ioQueue: DispatchQueue?
 
     func stop() {
         if aggregateID != kAudioObjectUnknown {
             AudioDeviceStop(aggregateID, procID)
             if let procID { AudioDeviceDestroyIOProcID(aggregateID, procID) }
+            ioQueue?.sync {}
             AudioHardwareDestroyAggregateDevice(aggregateID)
         }
+        ioQueue = nil
         if tapID != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tapID) }
         tapID = AudioObjectID(kAudioObjectUnknown)
         aggregateID = AudioObjectID(kAudioObjectUnknown)
@@ -96,9 +106,11 @@ private final class TapSession: @unchecked Sendable {
         try check(AudioHardwareCreateAggregateDevice(config as CFDictionary, &aggregateID), "create aggregate device")
 
         let format = try Self.read(tapID, kAudioTapPropertyFormat, as: AudioStreamBasicDescription.self)
+        guard format.mFormatID == kAudioFormatLinearPCM, format.mFormatFlags & kAudioFormatFlagIsFloat != 0 else { throw TapError.notFloat }
         let analyzer = SpectrumAnalyzer(bands: AudioSpectrum.bands, sampleRate: Float(format.mSampleRate))
         let interleavedChannels = (format.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0 ? 1 : Int(format.mChannelsPerFrame)
         let ioQueue = DispatchQueue(label: "niche.spectrum", qos: .userInteractive)
+        self.ioQueue = ioQueue
 
         try check(AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, ioQueue) { _, input, _, _, _ in
             let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
@@ -111,7 +123,7 @@ private final class TapSession: @unchecked Sendable {
         try check(AudioDeviceStart(aggregateID, procID), "start aggregate device")
     }
 
-    enum TapError: Error { case noAudioProcess, status(String, OSStatus) }
+    enum TapError: Error { case noAudioProcess, notFloat, status(String, OSStatus) }
 
     private func check(_ status: OSStatus, _ what: String) throws {
         guard status == noErr else { throw TapError.status(what, status) }

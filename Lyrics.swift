@@ -19,8 +19,9 @@ final class Lyrics {
     @ObservationIgnored private var key = ""
     @ObservationIgnored private var cache: [String: State] = [:]
     @ObservationIgnored private var task: Task<Void, Never>?
+    @ObservationIgnored private var measured = (text: "", width: CGFloat(0))
 
-    static let lead = 0.28
+    static let lead = 0.5
     private static let resize = Animation.spring(response: 0.45, dampingFraction: 0.95)
     static let closedFont = NSFont(descriptor: NSFont.systemFont(ofSize: 11.5, weight: .semibold).fontDescriptor.withDesign(.rounded)!, size: 11.5)!
 
@@ -33,8 +34,10 @@ final class Lyrics {
 
     var lineWidth: CGFloat {
         let text = line
-        guard !text.isEmpty else { return 0 }
-        return min(max(ceil((text as NSString).size(withAttributes: [.font: Self.closedFont]).width), 20), 280)
+        if text != measured.text {
+            measured = (text, ceil((text as NSString).size(withAttributes: [.font: Self.closedFont]).width))
+        }
+        return measured.width
     }
 
     func load(_ track: Track?) {
@@ -73,7 +76,7 @@ final class Lyrics {
         let next = lines.lastIndex { $0.time <= at }
         let singing = next.map { at <= lines[$0].end } ?? true
         guard next != index || singing != isSinging else { return }
-        withAnimation(.spring(response: 0.45, dampingFraction: 0.95)) {
+        withAnimation(Self.resize) {
             index = next
             isSinging = singing
         }
@@ -216,7 +219,7 @@ struct LyricsView: View {
             case .loaded(let lines, let synced):
                 let active = synced ? player.lyrics.index ?? 0 : min(Int(player.position / max(track.duration, 1) * Double(lines.count)), lines.count - 1)
                 rows(lines, active: active, synced: synced)
-                    .offset(y: Self.height * 0.38 - 18 - CGFloat(active) * 42)
+                    .offset(y: Self.height * 0.38 - 19 - CGFloat(active) * 44)
                     .animation(.spring(response: 0.5, dampingFraction: 0.75), value: active)
                     .frame(height: Self.height, alignment: .top)
             }
@@ -240,7 +243,7 @@ struct LyricsView: View {
                 }
             }
         }
-        .padding(.top, CGFloat(start) * 42)
+        .padding(.top, CGFloat(start) * 44)
     }
 }
 
@@ -273,12 +276,13 @@ private struct LyricRow: View {
     var body: some View {
         Button(action: seek) {
             Text(text)
-                .font(.system(size: isActive ? 15 : 13.5, weight: isActive ? .bold : .medium, design: .rounded))
+                .font(.system(size: isActive ? 14.5 : 13, weight: isActive ? .bold : .medium, design: .rounded))
                 .foregroundStyle(.white.opacity(opacity))
-                .lineLimit(2)
-                .minimumScaleFactor(0.7)
+                .multilineTextAlignment(.leading)
+                .lineLimit(3)
+                .minimumScaleFactor(0.6)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: 36)
+                .frame(height: 38)
                 .padding(.horizontal, 10)
                 .background(RoundedRectangle(cornerRadius: 9).fill(.white.opacity(isHovered && !isActive ? 0.08 : 0)))
                 .contentShape(Rectangle())

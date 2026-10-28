@@ -141,14 +141,13 @@ final class LabState {
     static var closedArtOffset: CGFloat { hasNotch ? -1 : 0 }
     static var closedArtLeading: CGFloat { hasNotch ? 5 : 7 }
     static var closedOffset: CGFloat { hasNotch ? -2 : 0 }
-    static let closedLyricsHeight: CGFloat = 22
     static func closedSize(hasContent: Bool) -> CGSize {
         CGSize(width: hardwareNotch.width + (hasContent ? 2 * MusicClosedView.slot : 0), height: hardwareNotch.height)
     }
     static var notchExtra: CGFloat { max(0, hardwareNotch.height - 32) }
     static var openSize: CGSize { CGSize(width: hardwareNotch.width + 160, height: 175 + notchExtra) }
     static var agentsWidth: CGFloat { max(openSize.width + 40, 385) }
-    static let lyricsWidth: CGFloat = 240
+    static let lyricsWidth: CGFloat = 280
     static var dropSize: CGSize { CGSize(width: closedSize(hasContent: true).width + 40, height: hardwareNotch.height + ClipboardDropZone.height) }
 
     var hasClosedContent: Bool { shownFeature != nil || idleArt != nil || lockState != .none || liveActivities.current != nil }
@@ -235,21 +234,32 @@ final class LabState {
         if isDropTarget { return Self.dropSize }
         let size = Self.closedSize(hasContent: hasClosedContent)
         let room = closedRoom
-        return CGSize(width: size.width + room.left + room.right + levelRoom, height: size.height + (hasClosedLyrics ? Self.closedLyricsHeight : 0))
+        return CGSize(width: size.width + room.left + room.right + levelRoom, height: size.height + (hasClosedLyrics ? closedLyricsHeight : 0))
+    }
+
+    var usesLyricsShelf: Bool { Self.hasNotch || notchStyle == .notch }
+
+    var closedLyricsWidth: CGFloat { usesLyricsShelf ? Self.closedSize(hasContent: true).width - 20 : 160 }
+
+    var hasTwoLineLyrics: Bool { player.isShowingLyrics && player.lyrics.lineWidth > closedLyricsWidth }
+
+    var closedLyricsHeight: CGFloat {
+        if usesLyricsShelf { return hasTwoLineLyrics ? 34 : 22 }
+        return hasTwoLineLyrics ? 12 : 0
     }
 
     var hasClosedLyrics: Bool {
-        Self.hasNotch && !controller.isExpanded && !isDropTarget && lockState == .none && liveActivities.current == nil
+        !controller.isExpanded && !isDropTarget && lockState == .none && liveActivities.current == nil
             && shownFeature == .music && player.isShowingLyrics && !player.lyrics.line.isEmpty
     }
 
     var closedRoom: (left: CGFloat, right: CGFloat) {
         guard !controller.isExpanded, !isDropTarget, lockState == .none, liveActivities.current == nil else { return (0, 0) }
         if shownFeature == nil { return idleArt != nil ? (-5, -MusicClosedView.slot) : (0, 0) }
-        if shownFeature == .music && player.isShowingLyrics && player.lyrics.lineWidth > 0 {
+        if shownFeature == .music && player.isShowingLyrics && !usesLyricsShelf {
             let width = player.lyrics.lineWidth
-            let room = Self.hasNotch ? Self.closedSize(hasContent: true).width - 28 : 100 - 24
-            let half = ceil(max(0, width - room) / 2)
+            let middle = hasTwoLineLyrics ? min(max(ceil(width / 2) + 12, closedLyricsWidth), 224) : width
+            let half = ceil(max(0, middle - Self.hardwareNotch.width) / 2)
             return (half, half)
         }
         guard shownFeature == .agents else { return (0, 0) }
@@ -528,7 +538,7 @@ struct NicheView: View {
                         if closedFeature == .agents || (lab.shownFeature == nil && lab.idleArt != nil) {
                             AgentClosedView(monitor: lab.agents, art: lab.idleArt)
                         } else {
-                            MusicClosedView(player: lab.player)
+                            MusicClosedView(player: lab.player, lab: lab)
                         }
                     }
                         .frame(width: LabState.closedSize(hasContent: true).width + lab.closedRoom.left + lab.closedRoom.right, height: size.height, alignment: .top)
@@ -815,7 +825,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) + 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         panel.canBecomeVisibleWithoutLogin = true
-        panel.contentView = NSHostingView(rootView: NicheView(lab: lab))
+        let host = NSHostingView(rootView: NicheView(lab: lab))
+        host.sizingOptions = []
+        panel.contentView = host
         panel.orderFrontRegardless()
 
         dropCatcher = NSPanel(contentRect: Self.dropFrame(), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)

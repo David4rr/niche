@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage
 import ImageIO
 import SwiftUI
 
@@ -77,6 +78,7 @@ final class MusicPlayer {
         self.send = unsafeBitCast(send, to: (@convention(c) (Int, AnyObject?) -> Bool).self)
         self.setElapsed = unsafeBitCast(setElapsed, to: (@convention(c) (Double) -> Void).self)
         self.setShuffle = unsafeBitCast(setShuffle, to: (@convention(c) (Int) -> Void).self)
+        output.onDeviceChange = { [weak self] in self?.spectrum.refresh() }
     }
 
     func start() {
@@ -85,7 +87,7 @@ final class MusicPlayer {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
         process.arguments = [resources.appendingPathComponent("mediaremote-adapter.pl").path,
                              resources.appendingPathComponent("MediaRemoteAdapter.framework").path,
-                             "stream", "--no-diff", "--debounce=50"]
+                             "stream", "--no-diff", "--debounce=50", "--micros"]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
@@ -129,14 +131,20 @@ final class MusicPlayer {
         }
         clearTask?.cancel()
         clearTask = nil
+        let isNewSong = lastSong.map { !$0.isSameSong(as: next) } ?? false
+        if isPlaying && !snapshot.isPlaying && !isNewSong {
+            elapsedAtTimestamp = max(snapshot.elapsed, min(elapsedAtTimestamp + Date().timeIntervalSince(timestamp) * rate, next.duration))
+            timestamp = Date()
+        } else {
+            elapsedAtTimestamp = snapshot.elapsed
+            timestamp = snapshot.timestamp
+        }
+        rate = snapshot.rate
         isPlaying = snapshot.isPlaying
         if let shuffle = snapshot.shuffleMode { isShuffled = shuffle != 1 }
-        elapsedAtTimestamp = snapshot.elapsed
-        timestamp = snapshot.timestamp
-        rate = snapshot.rate
         spectrum.follow(pid: snapshot.isPlaying ? snapshot.pid : nil)
 
-        let isNewSong = lastSong.map { !$0.isSameSong(as: next) } ?? false
+        if isNewSong && isShowingLyrics { lyrics.load(next) }
         if isNewSong && next.artwork == nil {
             if pendingSong.map({ !$0.isSameSong(as: next) }) ?? true {
                 pendingDeadline?.cancel()
@@ -176,12 +184,16 @@ final class MusicPlayer {
         let follow = isShowingLyrics && isPlaying
         guard follow != (lyricsTimer != nil) else { return }
         lyricsTimer?.invalidate()
-        lyricsTimer = follow ? Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+        lyricsTimer = nil
+        guard follow else { return }
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.lyrics.sync(self.elapsedAtTimestamp + Date().timeIntervalSince(self.timestamp) * self.rate)
             }
-        } : nil
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        lyricsTimer = timer
     }
 
     func togglePlay() { _ = send(2, nil) }
@@ -231,7 +243,6 @@ private struct NowPlayingSnapshot: @unchecked Sendable {
     let pid: pid_t?
     let app: String?
 
-    nonisolated(unsafe) private static let iso: ISO8601DateFormatter = ISO8601DateFormatter()
     nonisolated(unsafe) private static var cachedArtwork: (key: String, image: NSImage?) = ("", nil)
 
     init(_ p: [String: Any]) {
@@ -244,15 +255,15 @@ private struct NowPlayingSnapshot: @unchecked Sendable {
             track = Track(title: title,
                           artist: p["artist"] as? String ?? "",
                           album: p["album"] as? String ?? "",
-                          duration: p["duration"] as? Double ?? 0,
+                          duration: (p["durationMicros"] as? Double ?? 0) / 1_000_000,
                           artwork: Self.cachedArtwork.image,
                           artworkKey: key)
         } else {
             track = nil
         }
         isPlaying = p["playing"] as? Bool ?? false
-        elapsed = p["elapsedTime"] as? Double ?? 0
-        timestamp = (p["timestamp"] as? String).flatMap { Self.iso.date(from: $0) } ?? Date()
+        elapsed = (p["elapsedTimeMicros"] as? Double ?? 0) / 1_000_000
+        timestamp = (p["timestampEpochMicros"] as? Double).map { Date(timeIntervalSince1970: $0 / 1_000_000) } ?? Date()
         rate = p["playbackRate"] as? Double ?? 1
         shuffleMode = p["shuffleMode"] as? Int
         pid = (p["processIdentifier"] as? Int).map { pid_t($0) }
@@ -373,7 +384,7 @@ struct WaveformView: View {
                     let step = UInt64(context.date.timeIntervalSinceReferenceDate / Self.tick)
                     let minHeight: CGFloat = 2.5
                     let heights = levels.indices.map { bar -> CGFloat in
-                        let level = isLive ? levels[bar] : simulatedLevel(bar: bar, step: step)
+                        let level = isLive ? levels[bar] : Self.simulatedLevel(track: track, bar: bar, step: step)
                         let raw = isPlaying ? minHeight + CGFloat(level) * (maxHeight - minHeight) : minHeight
                         return (raw * displayScale).rounded() / displayScale
                     }
@@ -389,7 +400,7 @@ struct WaveformView: View {
             .frame(width: CGFloat(AudioSpectrum.bands) * barWidth * 1.75, height: maxHeight)
     }
 
-    private func simulatedLevel(bar: Int, step: UInt64) -> Float {
+    static func simulatedLevel(track: Track, bar: Int, step: UInt64) -> Float {
         let seed = UInt64(bitPattern: Int64(track.title.hashValue ^ track.artist.hashValue))
         var x = (step &* 0xbf58476d1ce4e5b9) ^ (UInt64(bar) &* 0x94d049bb133111eb) ^ seed
         x = x &+ 0x9e3779b97f4a7c15
@@ -397,6 +408,117 @@ struct WaveformView: View {
         x = (x ^ (x >> 27)) &* 0x94d049bb133111eb
         x ^= x >> 31
         return 0.25 + 0.75 * Float(x % 1000) / 1000
+    }
+}
+
+struct ClosedWaveform: NSViewRepresentable {
+    let track: Track
+    let spectrum: AudioSpectrum
+    let isPlaying: Bool
+
+    func makeNSView(context: Context) -> WaveformLayer { WaveformLayer() }
+
+    func updateNSView(_ view: WaveformLayer, context: Context) {
+        view.update(track: track, levels: spectrum.isEnabled ? spectrum.levels : nil, isPlaying: isPlaying)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: WaveformLayer, context: Context) -> CGSize? {
+        CGSize(width: CGFloat(AudioSpectrum.bands) * WaveformLayer.barWidth * 1.75, height: WaveformLayer.maxHeight)
+    }
+}
+
+final class WaveformLayer: NSView {
+    static let barWidth: CGFloat = 2.4
+    static let maxHeight: CGFloat = 12
+    private let art = CALayer()
+    private let bars = CALayer()
+    private var track: Track?
+    private var levels: [Float]?
+    private var isPlaying = false
+    private var timer: Timer?
+    private var step: UInt64 = 0
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layerUsesCoreImageFilters = true
+        art.contentsGravity = .resizeAspectFill
+        art.filters = [CIFilter(name: "CIGaussianBlur", parameters: [kCIInputRadiusKey: 5])!,
+                       CIFilter(name: "CIColorControls", parameters: [kCIInputSaturationKey: 1.5, kCIInputBrightnessKey: 0.12])!]
+        for _ in 0..<AudioSpectrum.bands {
+            let bar = CALayer()
+            bar.backgroundColor = .white
+            bar.cornerRadius = Self.barWidth / 2
+            bars.addSublayer(bar)
+        }
+        art.mask = bars
+        layer!.addSublayer(art)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    func update(track: Track, levels: [Float]?, isPlaying: Bool) {
+        if track.artworkKey != self.track?.artworkKey {
+            art.contents = track.artwork
+            art.backgroundColor = track.artwork == nil ? NSColor(white: 0.22, alpha: 1).cgColor : nil
+        }
+        self.track = track
+        self.levels = levels
+        self.isPlaying = isPlaying
+        let runs = isPlaying && levels == nil && window != nil
+        if runs != (timer != nil) {
+            timer?.invalidate()
+            timer = nil
+            if runs {
+                let timer = Timer(timeInterval: WaveformView.tick, repeats: true) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        guard let self else { return }
+                        self.step += 1
+                        self.layoutBars(duration: WaveformView.tick)
+                    }
+                }
+                RunLoop.main.add(timer, forMode: .common)
+                self.timer = timer
+            }
+        }
+        layoutBars(duration: levels == nil ? 0.3 : 1.0 / 24)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let track { update(track: track, levels: levels, isPlaying: isPlaying) }
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        guard let window else { return }
+        art.contentsScale = window.backingScaleFactor
+    }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        art.frame = bounds
+        bars.frame = bounds
+        CATransaction.commit()
+        layoutBars(duration: 0)
+    }
+
+    private func layoutBars(duration: Double) {
+        guard let track, let window, let layers = bars.sublayers else { return }
+        let scale = window.backingScaleFactor
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(duration)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+        CATransaction.setDisableActions(duration == 0)
+        for (bar, layer) in layers.enumerated() {
+            let level = levels.map { $0[bar] } ?? WaveformView.simulatedLevel(track: track, bar: bar, step: step)
+            let raw = isPlaying ? 2.5 + CGFloat(level) * (Self.maxHeight - 2.5) : 2.5
+            let height = (raw * scale).rounded() / scale
+            layer.frame = CGRect(x: (CGFloat(bar) * 1.75 + 0.375) * Self.barWidth, y: (bounds.height - height) / 2, width: Self.barWidth, height: height)
+        }
+        CATransaction.commit()
     }
 }
 
@@ -711,13 +833,15 @@ private struct PressSquash: ButtonStyle {
 
 struct MusicClosedView: View {
     let player: MusicPlayer
+    let lab: LabState
     static let slot: CGFloat = 38
     @State private var lastTrack: Track?
 
     var body: some View {
         let shown = player.track ?? lastTrack
         let line = player.isShowingLyrics ? player.lyrics.line : ""
-        let underNotch = LabState.hasNotch && !line.isEmpty
+        let underNotch = lab.usesLyricsShelf && !line.isEmpty
+        let twoRows = lab.hasTwoLineLyrics
 
         VStack(spacing: 0) {
             if let track = shown {
@@ -730,19 +854,18 @@ struct MusicClosedView: View {
                     if line.isEmpty || underNotch {
                         Spacer(minLength: 0)
                     } else {
-                        lyric(line).frame(maxWidth: .infinity)
+                        lyric(line, twoRows: twoRows)
                     }
-                    WaveformView(track: track, spectrum: player.spectrum, isPlaying: player.isPlaying, barWidth: 2.4, maxHeight: 12)
+                    ClosedWaveform(track: track, spectrum: player.spectrum, isPlaying: player.isPlaying)
                         .padding(.trailing, 9)
                         .frame(width: Self.slot, alignment: .trailing)
                 }
-                .frame(height: LabState.hardwareNotch.height)
+                .frame(height: LabState.hardwareNotch.height + (underNotch ? 0 : lab.closedLyricsHeight))
 
                 if underNotch {
-                    lyric(line)
-                        .frame(maxWidth: .infinity)
+                    lyric(line, twoRows: twoRows)
                         .padding(.horizontal, 10)
-                        .frame(height: LabState.closedLyricsHeight, alignment: .center)
+                        .frame(height: lab.closedLyricsHeight)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
@@ -753,17 +876,19 @@ struct MusicClosedView: View {
         }
     }
 
-    private func lyric(_ text: String) -> some View {
+    private func lyric(_ text: String, twoRows: Bool) -> some View {
         ZStack {
             Text(text)
                 .font(.system(size: 11.5, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .multilineTextAlignment(twoRows ? .leading : .center)
+                .lineLimit(twoRows ? 2 : 1)
+                .minimumScaleFactor(0.7)
                 .id(text)
                 .transition(.blurReplace(.downUp))
         }
-        .frame(height: 18)
+        .frame(maxWidth: .infinity, alignment: twoRows ? .leading : .center)
+        .frame(height: twoRows ? 30 : 18)
         .clipped()
     }
 }
