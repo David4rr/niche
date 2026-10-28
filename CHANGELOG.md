@@ -1,5 +1,9 @@
 # changelog
 
+## 0.6.9.6
+
+- niche no longer crashes when the network drops while it looks up lyrics. the error message carried the song's web address, and a `%` in it was read as part of the log format. thanks @David4rr.
+
 ## 0.6.9.5
 
 - the closed notch sat its artwork and bars too low on macs with a camera notch when lyrics were off, cutting off the bottom of the bars. they're centered again.
