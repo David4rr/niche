@@ -15,17 +15,21 @@ lipo -thin arm64e -output "$framework/Versions/A/MediaRemoteAdapter" vendor/medi
 strip -x "$framework/Versions/A/MediaRemoteAdapter" 2>/dev/null
 sign_identity="${CODE_SIGN_IDENTITY:-}"
 if [ -z "$sign_identity" ]; then
-    if security find-identity -p codesigning -v 2>/dev/null | grep -q "Apple Development"; then
-        sign_identity="Apple Development"
-    else
-        sign_identity="-"
-        echo "no Apple Development certificate, signing ad-hoc. macos asks for permissions again after every build." >&2
-    fi
+    for candidate in "Apple Development" "Mac Developer" "Developer ID Application"; do
+        if security find-identity -p codesigning -v 2>/dev/null | grep -q "$candidate"; then
+            sign_identity="$candidate"
+            break
+        fi
+    done
+fi
+if [ -z "$sign_identity" ]; then
+    sign_identity="-"
+    echo "no signing certificate: signing ad-hoc with a stable identifier requirement, so Accessibility survives rebuilds; grant it once." >&2
 fi
 codesign --force --sign "$sign_identity" "$framework"
 
 xcrun swiftc -Osize -wmo -parse-as-library -target arm64-apple-macos15.0 -Xlinker -dead_strip \
-    -o "$app/Contents/MacOS/Niche" NotchAnimation.swift AudioSpectrum.swift LyricsModel.swift LyricsNormalization.swift LyricsWordParser.swift YRCParser.swift LyricsCache.swift LRCLIBClient.swift SecondaryLyricsClients.swift AsianLyricsClients.swift WordLyricsClients.swift UnisonClient.swift YouTubeMusicClient.swift LyricsService.swift Lyrics.swift LyricsViews.swift ClosedLyricsLayout.swift MusicLab.swift OutputDevice.swift Headphones.swift AgentSessions.swift AgentUsage.swift LiveActivities.swift Updater.swift Clipboard.swift IdleArt.swift Onboarding.swift SettingsView.swift NicheApp.swift
+    -o "$app/Contents/MacOS/Niche" NotchAnimation.swift AudioSpectrum.swift LyricsModel.swift LyricsNormalization.swift LyricsWordParser.swift YRCParser.swift LyricsCache.swift LRCLIBClient.swift SecondaryLyricsClients.swift AsianLyricsClients.swift WordLyricsClients.swift UnisonClient.swift YouTubeMusicClient.swift LyricsService.swift Lyrics.swift LyricsViews.swift ClosedLyricsLayout.swift MusicLab.swift OutputDevice.swift Headphones.swift AgentSessions.swift AgentUsage.swift LiveActivities.swift Updater.swift Clipboard.swift IdleArt.swift Onboarding.swift SettingsView.swift LyricsProviderOrder.swift NicheApp.swift
 strip -x "$app/Contents/MacOS/Niche"
 
 xcrun actool AppIcon.icon --compile "$app/Contents/Resources" --platform macosx --minimum-deployment-target 15.0 \
@@ -52,7 +56,15 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-codesign --force --sign "$sign_identity" "$app"
+if [ "$sign_identity" = "-" ]; then
+    # An ad-hoc signature's default requirement pins the cdhash, which changes on every build and
+    # makes macOS forget Accessibility each time. Pin the identifier instead: same TCC entry across
+    # rebuilds, and this dev build is only run on this Mac.
+    codesign --force --sign - --identifier local.niche \
+        --requirements '=designated => identifier "local.niche"' "$app"
+else
+    codesign --force --sign "$sign_identity" "$app"
+fi
 
 staging="$out/dmg"
 mkdir -p "$staging"

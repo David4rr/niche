@@ -168,7 +168,6 @@ struct SettingsView: View {
                     Picker("Source", selection: Binding(get: { player.lyrics.source }, set: { player.lyrics.source = $0 })) {
                         ForEach(LyricsSource.allCases, id: \.self) { Text($0.name).tag($0) }
                     }
-                    Toggle("Karaoke", isOn: Binding(get: { player.lyrics.isKaraoke }, set: { player.lyrics.isKaraoke = $0 }))
                     LabeledContent("Timing") {
                         HStack(spacing: 10) {
                             Slider(value: Binding(get: { player.lyrics.delay }, set: { player.lyrics.delay = $0 }), in: -1...1, step: 0.05)
@@ -181,8 +180,11 @@ struct SettingsView: View {
                 }
                 .disabled(!player.allowsLyrics)
             } footer: {
-                Text("Adds a lyrics button to the player. Automatic asks every source and keeps the best timed lyrics; pick a source to use only that one. Boidu carries Apple Music's own lyrics. Karaoke lights up the current line word by word in the closed notch. Move timing if lyrics run ahead of or behind what you hear. Sources only see the songs you open lyrics for.")
+                Text("Adds a lyrics button to the player. Automatic asks the sources in the order below and keeps the first timed result; pick a source to use only that one. Boidu carries Apple Music's own lyrics. Word-by-word sources light the current line up in the closed notch; line-only ones show it still. Move timing if lyrics run ahead of or behind what you hear. Sources only see the songs you open lyrics for.")
             }
+            LyricsProviderOrderView(order: Binding(get: { player.lyrics.providerOrder },
+                                                   set: { player.lyrics.providerOrder = $0 }))
+                .disabled(!player.allowsLyrics)
         }
     }
 
@@ -294,7 +296,7 @@ struct SettingsView: View {
                     }
                 }
             } footer: {
-                Text("Niche needs your permission to hide and replace the system volume and brightness popups. It takes over those keys so only the notch shows the change. Focus has no key to take over, so macOS may still show its own Focus banner.")
+                Text("Niche needs your permission to hide and replace the system volume and brightness popups. It takes over those keys so only the notch shows the change. Bluetooth audio reports volume back to macOS, so the system popup still appears for Bluetooth output; the notch mirrors it. Focus has no key to take over, so macOS may still show its own Focus banner.")
             }
             .disabled(!center.isOn)
         }

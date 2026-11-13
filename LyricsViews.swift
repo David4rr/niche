@@ -208,7 +208,7 @@ struct ClosedLyric: NSViewRepresentable {
 
     func updateNSView(_ view: KaraokeView, context: Context) {
         let lyrics = player.lyrics
-        let timings = lyrics.isKaraoke ? lyrics.activeLine.flatMap { $0.text == text ? $0.charTimings : nil } : nil
+        let timings = lyrics.activeLine.flatMap { $0.text == text ? $0.charTimings : nil }
         view.update(text: text, timings: timings, twoRows: twoRows,
                     time: player.currentPosition - lyrics.delay, isPlaying: player.isPlaying)
     }
@@ -385,7 +385,13 @@ final class KaraokeView: NSView {
             guard isPlaying, time < first + span else { continue }
             let move = CAKeyframeAnimation(keyPath: "position.x")
             move.values = row.keys.map { $0.x - bounds.width / 2 }
-            move.keyTimes = row.keys.map { NSNumber(value: ($0.time - first) / span) }
+            var previous = 0.0
+            move.keyTimes = row.keys.map { key in
+                // Core Animation needs non-decreasing key times; a provider that repeats a cue
+                // must not make the mask walk backwards.
+                previous = min(1, max(previous, (key.time - first) / span))
+                return NSNumber(value: previous)
+            }
             move.duration = span
             move.beginTime = edge.convertTime(now, from: nil) + first - time
             move.fillMode = .both
@@ -402,6 +408,7 @@ final class KaraokeView: NSView {
         guard let after = keys.firstIndex(where: { $0.time > time }) else { return keys[keys.count - 1].x }
         guard after > 0 else { return keys[0].x }
         let a = keys[after - 1], b = keys[after]
+        guard b.time > a.time else { return b.x }
         return a.x + (b.x - a.x) * CGFloat((time - a.time) / (b.time - a.time))
     }
 }

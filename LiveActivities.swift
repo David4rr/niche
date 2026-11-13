@@ -79,6 +79,7 @@ final class LiveActivityCenter {
     @ObservationIgnored private var keyTap: CFMachPort?
     @ObservationIgnored private var keyTapSource: CFRunLoopSource?
     @ObservationIgnored private var keyTapRetry: Task<Void, Never>?
+    @ObservationIgnored private var keyTapTrustTimer: Timer?
     @ObservationIgnored private var headphones: HeadphonesWatcher?
 
     nonisolated(unsafe) private static weak var shared: LiveActivityCenter?
@@ -164,18 +165,7 @@ final class LiveActivityCenter {
         lastVolume = nil
         isBluetoothOutput = false
         lastVolumeKeyAt = 0
-        keyTapRetry?.cancel()
-        keyTapRetry = nil
-        if let keyTapSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), keyTapSource, .commonModes)
-            self.keyTapSource = nil
-        }
-        if let keyTap {
-            CGEvent.tapEnable(tap: keyTap, enable: false)
-            CFMachPortInvalidate(keyTap)
-            self.keyTap = nil
-        }
-        isKeyTapActive = false
+        stopKeyTap()
         if let current, !watching(current.kind) { hide() }
 
         if needsKeyTap { startKeyTap() }
@@ -237,12 +227,8 @@ final class LiveActivityCenter {
             requestAccessibility()
         }
         guard AXIsProcessTrusted() else {
-            keyTapRetry?.cancel()
-            keyTapRetry = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(3))
-                guard !Task.isCancelled, let self, self.keyTap == nil, self.needsKeyTap else { return }
-                self.startKeyTap()
-            }
+            NSLog("Niche: accessibility is not granted for this build; media keys fall back to the system HUD")
+            armKeyTapRetry()
             return
         }
         let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue) | (1 << 14)
@@ -262,10 +248,66 @@ final class LiveActivityCenter {
         keyTap = tap
         keyTapSource = source
         isKeyTapActive = true
+        watchKeyTapTrust()
+        NSLog("Niche: media key tap installed")
+    }
+
+    /// The tap is a session-level event tap on the main run loop: while it exists macOS holds
+    /// input until the callback returns, so a tap whose permission was revoked can freeze the
+    /// mouse and keyboard. Check the grant instead of trusting the tap to stay valid.
+    private func watchKeyTapTrust() {
+        keyTapTrustTimer?.invalidate()
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.keyTap != nil else { return }
+                guard !AXIsProcessTrusted() else { return }
+                NSLog("Niche lost the accessibility grant; removing the media key tap")
+                self.stopKeyTap(reschedule: true)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        keyTapTrustTimer = timer
+    }
+
+    private func armKeyTapRetry() {
+        keyTapRetry?.cancel()
+        keyTapRetry = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, let self, self.keyTap == nil, self.needsKeyTap else { return }
+            self.startKeyTap()
+        }
+    }
+
+    private func stopKeyTap(reschedule: Bool = false) {
+        keyTapTrustTimer?.invalidate()
+        keyTapTrustTimer = nil
+        keyTapRetry?.cancel()
+        keyTapRetry = nil
+        if let keyTapSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), keyTapSource, .commonModes)
+            self.keyTapSource = nil
+        }
+        if let keyTap {
+            CGEvent.tapEnable(tap: keyTap, enable: false)
+            CFMachPortInvalidate(keyTap)
+            self.keyTap = nil
+        }
+        isKeyTapActive = false
+        if reschedule, needsKeyTap { armKeyTapRetry() }
     }
 
     private func handleTap(type: CGEventType, event: CGEvent) -> Bool {
-        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        if type == .tapDisabledByUserInput {
+            // Accessibility was switched off, or another app took exclusive input. Re-enabling
+            // here is what wedged the session-level stream; drop the tap and ask again later.
+            Task { @MainActor [weak self] in self?.stopKeyTap(reschedule: true) }
+            return false
+        }
+        if type == .tapDisabledByTimeout {
+            guard AXIsProcessTrusted() else {
+                Task { @MainActor [weak self] in self?.stopKeyTap(reschedule: true) }
+                return false
+            }
             if let keyTap { CGEvent.tapEnable(tap: keyTap, enable: true) }
             return false
         }
@@ -297,7 +339,11 @@ final class LiveActivityCenter {
         let step: Float = fine ? 1.0 / 64 : 1.0 / 16
         if !isVolume && isDown { brightnessKeyAt = Date() }
         guard replacesSystemHUD else { return false }
-        if isVolume && (isBluetoothOutput || Self.isBluetooth(volumeDevice)) { return false }
+        // Setting the virtual main volume on a Bluetooth device makes the headset report the new
+        // absolute volume back over AVRCP. macOS draws its own HUD for that device-initiated echo,
+        // so intercepting the key cannot remove the system popup. Hand those keys to macOS and keep
+        // the notch HUD for outputs where the system does not echo.
+        if isVolume && isBluetoothOutput { return false }
         guard isDown else { return true }
         if isVolume {
             let now = CACurrentMediaTime()

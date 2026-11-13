@@ -71,6 +71,16 @@ actor LyricsCache {
         pruneDisk()
     }
 
+    func clear() {
+        memoryCache.removeAll()
+        memoryOrder.removeAll()
+        guard let urls = try? fm.contentsOfDirectory(at: folderURL, includingPropertiesForKeys: nil,
+                                                     options: .skipsHiddenFiles) else { return }
+        for url in urls where url.pathExtension == "json" {
+            try? fm.removeItem(at: url)
+        }
+    }
+
     private func pruneDisk() {
         let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
         guard let urls = try? fm.contentsOfDirectory(at: folderURL, includingPropertiesForKeys: keys, options: .skipsHiddenFiles) else { return }

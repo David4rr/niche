@@ -59,13 +59,14 @@ enum YRCParser {
                 continue
             }
 
+            let wordsEnd = words.map(\.end).max() ?? lineStart
+            let naturalEnd = lineDur > 0 ? max((ms + durMs) / 1000.0, wordsEnd) : wordsEnd
             let charTimings = LyricsWordParser.wordTimingsToCharTimings(
                 fullText: text,
                 words: words,
-                lineStart: lineStart
+                lineStart: lineStart,
+                lineEnd: naturalEnd
             )
-            let wordsEnd = words.map(\.end).max() ?? lineStart
-            let naturalEnd = lineDur > 0 ? max((ms + durMs) / 1000.0, wordsEnd) : wordsEnd
             entries.append((time: lineStart, naturalEnd: naturalEnd, text: text, charTimings: charTimings))
         }
 

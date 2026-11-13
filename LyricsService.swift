@@ -1,115 +1,121 @@
 import Foundation
 
-enum LyricsSource: String, CaseIterable, Sendable {
-    case automatic, boidu, lyricsPlus, lrclib, youtubeMusic, unison, netease, qqMusic, kugou, deezer
+enum LyricsSource: String, CaseIterable, Sendable, Identifiable {
+    case automatic, boidu, unison, lyricsPlus, lrclib, youtubeMusic, netease, qqMusic, kugou, deezer
+
+    var id: String { rawValue }
 
     var name: String {
         switch self {
         case .automatic: "Automatic"
         case .boidu: "Boidu (Apple Music)"
+        case .unison: "Unison"
         case .lyricsPlus: "LyricsPlus"
         case .lrclib: "LRCLIB"
         case .youtubeMusic: "YouTube Music"
-        case .unison: "Unison"
         case .netease: "NetEase"
         case .qqMusic: "QQ Music"
         case .kugou: "Kugou"
         case .deezer: "Deezer"
         }
     }
+
+    /// Limusic's default order: the word-timed catalogues lead, then the general LRC lookups,
+    /// then the regional ones. Deezer is niche's last stop, kept after the list for coverage.
+    static let defaultOrder: [LyricsSource] = [
+        .boidu, .unison, .lyricsPlus, .lrclib, .youtubeMusic, .netease, .qqMusic, .kugou, .deezer
+    ]
 }
 
 actor LyricsService {
     static let shared = LyricsService()
     static let agent = "Niche/\(Bundle.main.infoDictionary!["CFBundleShortVersionString"] as! String) (https://github.com/raihanadf/niche)"
 
-    func fetch(title: String, artist: String, album: String? = nil, duration: Double, source: LyricsSource) async -> Lyrics.State {
+    /// Providers start this far apart, like Limusic's `STAGGER`: a hit at the top usually sends
+    /// one or two requests below it, while a song nobody has still costs one provider's latency.
+    private static let stagger = Duration.milliseconds(300)
+
+    func fetch(title: String, artist: String, album: String? = nil, duration: Double,
+               source: LyricsSource, order: [LyricsSource] = LyricsSource.defaultOrder) async -> Lyrics.State {
         guard !Task.isCancelled,
               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               duration.isFinite, duration >= 0 else { return .missing }
 
-        let lines: [LyricLine]?
-        switch source {
-        case .automatic: return await automatic(title: title, artist: artist, album: album, duration: duration)
-        case .boidu: lines = await BoiduClient.fetch(title: title, artist: artist, album: album, duration: duration)
-        case .lyricsPlus: lines = await LyricsPlusClient.fetch(title: title, artist: artist, album: album, duration: duration)
-        case .lrclib: lines = await LRCLIBClient.fetch(title: title, artist: artist, album: album, duration: duration)
-        case .youtubeMusic: lines = await YouTubeMusicClient.fetch(title: title, artist: artist, duration: duration)
-        case .unison: lines = await UnisonClient.fetch(title: title, artist: artist, duration: duration)
-        case .netease: lines = await NetEaseClient.fetch(title: title, artist: artist, duration: duration)
-        case .qqMusic: lines = await QQMusicClient.fetch(title: title, artist: artist, duration: duration)
-        case .kugou: lines = await KugouClient.fetch(title: title, artist: artist, duration: duration)
-        case .deezer: lines = await DeezerClient.fetch(title: title, artist: artist, duration: duration)
+        if source == .automatic {
+            return await automatic(title: title, artist: artist, album: album, duration: duration, order: order)
         }
-        guard !Task.isCancelled, let lines else { return .missing }
+        guard !Task.isCancelled,
+              let lines = await lines(from: source, title: title, artist: artist, album: album, duration: duration) else {
+            return .missing
+        }
+        return validate(lines, duration: duration)
+    }
+
+    private func validate(_ lines: [LyricLine], duration: Double) -> Lyrics.State {
         if isValidSynced(lines, duration: duration) { return .loaded(lines, synced: true) }
         return isValidPlain(lines, duration: duration) ? .loaded(lines, synced: false) : .missing
     }
 
-    private func automatic(title: String, artist: String, album: String?, duration: Double) async -> Lyrics.State {
-        async let boidu = BoiduClient.fetch(title: title, artist: artist, album: album, duration: duration)
-        async let lyricsPlus = LyricsPlusClient.fetch(title: title, artist: artist, album: album, duration: duration)
-        let (bLines, lpLines) = await (boidu, lyricsPlus)
-        guard !Task.isCancelled else { return .missing }
-
-        if let bLines, isWordTimed(bLines, duration: duration) {
-            return .loaded(bLines, synced: true)
+    private func lines(from source: LyricsSource, title: String, artist: String,
+                       album: String?, duration: Double) async -> [LyricLine]? {
+        switch source {
+        case .automatic: nil
+        case .boidu: await BoiduClient.fetch(title: title, artist: artist, album: album, duration: duration)
+        case .unison: await UnisonClient.fetch(title: title, artist: artist, duration: duration)
+        case .lyricsPlus: await LyricsPlusClient.fetch(title: title, artist: artist, album: album, duration: duration)
+        case .lrclib: await LRCLIBClient.fetch(title: title, artist: artist, album: album, duration: duration)
+        case .youtubeMusic: await YouTubeMusicClient.fetch(title: title, artist: artist, duration: duration)
+        case .netease: await NetEaseClient.fetch(title: title, artist: artist, duration: duration)
+        case .qqMusic: await QQMusicClient.fetch(title: title, artist: artist, duration: duration)
+        case .kugou: await KugouClient.fetch(title: title, artist: artist, duration: duration)
+        case .deezer: await DeezerClient.fetch(title: title, artist: artist, duration: duration)
         }
-        if let lpLines, isWordTimed(lpLines, duration: duration) {
-            return .loaded(lpLines, synced: true)
-        }
+    }
 
-        var lLines: [LyricLine]?
-        var yLines: [LyricLine]?
-        let uLines: [LyricLine]?
-        let nLines: [LyricLine]?
-        if isValidSynced(bLines, duration: duration) || isValidSynced(lpLines, duration: duration) {
-            async let unison = UnisonClient.fetch(title: title, artist: artist, duration: duration)
-            async let netease = NetEaseClient.fetch(title: title, artist: artist, duration: duration)
-            (uLines, nLines) = await (unison, netease)
-        } else {
-            async let lrclib = LRCLIBClient.fetch(title: title, artist: artist, album: album, duration: duration)
-            async let ytm = YouTubeMusicClient.fetch(title: title, artist: artist, duration: duration)
-            async let unison = UnisonClient.fetch(title: title, artist: artist, duration: duration)
-            async let netease = NetEaseClient.fetch(title: title, artist: artist, duration: duration)
-            (lLines, yLines, uLines, nLines) = await (lrclib, ytm, unison, netease)
-        }
-        guard !Task.isCancelled else { return .missing }
+    /// Order matters, not speed: answers are read top to bottom and the first synced one wins,
+    /// exactly like Limusic reads its `lyrics_providers` list. A slower provider higher up still
+    /// beats a quicker one below it, which is why the word-timed catalogues sit first.
+    private func automatic(title: String, artist: String, album: String?, duration: Double,
+                           order: [LyricsSource]) async -> Lyrics.State {
+        let providers = order.filter { $0 != .automatic }
+        guard !providers.isEmpty else { return .missing }
 
-        if let uLines, isWordTimed(uLines, duration: duration) {
-            return .loaded(uLines, synced: true)
-        }
-        if let nLines, isWordTimed(nLines, duration: duration) {
-            return .loaded(nLines, synced: true)
-        }
+        var answers = [[LyricLine]?](repeating: nil, count: providers.count)
+        var arrived = [Bool](repeating: false, count: providers.count)
+        var next = 0
+        var plain: [LyricLine]?
+        var settled: Lyrics.State?
 
-        for lines in [bLines, lpLines, lLines, yLines, uLines, nLines].compactMap({ $0 })
-            where isValidSynced(lines, duration: duration) {
-            return .loaded(lines, synced: true)
-        }
-
-        async let qq = QQMusicClient.fetch(title: title, artist: artist, duration: duration)
-        async let kugou = KugouClient.fetch(title: title, artist: artist, duration: duration)
-        let (qLines, kLines) = await (qq, kugou)
-        guard !Task.isCancelled else { return .missing }
-
-        for lines in [qLines, kLines].compactMap({ $0 })
-            where isValidSynced(lines, duration: duration) {
-            return .loaded(lines, synced: true)
-        }
-
-        let dLines = await DeezerClient.fetch(title: title, artist: artist, duration: duration)
-        guard !Task.isCancelled else { return .missing }
-        if let dLines, isValidSynced(dLines, duration: duration) {
-            return .loaded(dLines, synced: true)
-        }
-
-        for fallback in [bLines, lpLines, lLines, yLines, uLines, nLines, qLines, kLines, dLines].compactMap({ $0 })
-            where isValidPlain(fallback, duration: duration) {
-            return .loaded(fallback, synced: false)
+        await withTaskGroup(of: (Int, [LyricLine]?).self) { group in
+            for (index, source) in providers.enumerated() {
+                group.addTask { [weak self] in
+                    if index > 0 { try? await Task.sleep(for: Self.stagger * index) }
+                    guard !Task.isCancelled, let self else { return (index, nil) }
+                    let lines = await self.lines(from: source, title: title, artist: artist,
+                                                 album: album, duration: duration)
+                    return (index, lines)
+                }
+            }
+            while let (index, lines) = await group.next() {
+                guard index < answers.count else { continue }
+                answers[index] = lines
+                arrived[index] = true
+                while next < providers.count, arrived[next] {
+                    if let hit = answers[next], isValidSynced(hit, duration: duration) {
+                        settled = .loaded(hit, synced: true)
+                        group.cancelAll()
+                        return
+                    }
+                    if plain == nil, let hit = answers[next], isValidPlain(hit, duration: duration) {
+                        plain = hit
+                    }
+                    next += 1
+                }
+            }
         }
 
-        return .missing
+        if let settled { return settled }
+        return plain.map { .loaded($0, synced: false) } ?? .missing
     }
 
     private func hasRealSync(_ lines: [LyricLine]) -> Bool {
@@ -128,10 +134,5 @@ actor LyricsService {
     private func isValidSynced(_ lines: [LyricLine]?, duration: Double) -> Bool {
         guard let lines, LyricsWordParser.isValidDuration(lines: lines, duration: duration) else { return false }
         return hasRealSync(lines)
-    }
-
-    private func isWordTimed(_ lines: [LyricLine]?, duration: Double) -> Bool {
-        guard let lines, isValidSynced(lines, duration: duration) else { return false }
-        return lines.contains { !$0.charTimings.isEmpty }
     }
 }

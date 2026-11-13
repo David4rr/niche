@@ -50,7 +50,8 @@ enum LyricsWordParser {
     }
 
     static func wordTimingsToCharTimings(
-        fullText: String, words: [(start: Double, end: Double, text: String)], lineStart: Double
+        fullText: String, words: [(start: Double, end: Double, text: String)],
+        lineStart: Double, lineEnd: Double
     ) -> [Double] {
         guard !fullText.isEmpty, !words.isEmpty else { return [] }
         let chars = Array(fullText), totalCount = chars.count
@@ -78,6 +79,28 @@ enum LyricsWordParser {
         for i in 0..<totalCount {
             if timings[i] < curr { timings[i] = curr } else { curr = timings[i] }
         }
+        // Characters a word boundary did not account for (spaces, punctuation, a trailing token
+        // the provider left untimed) all inherit one timestamp above. Replayed as keyframes, that
+        // timestamp turns the last stretch of the line into a single frame: the sweep jumps
+        // straight to the end. Give every character in a collapsed run its own slice of the next
+        // cue, or of the line's end for the final run.
+        var runStart = 0
+        while runStart < totalCount {
+            var runEnd = runStart + 1
+            while runEnd < totalCount, abs(timings[runEnd] - timings[runStart]) < 1e-9 { runEnd += 1 }
+            let count = runEnd - runStart
+            if count > 1 {
+                let start = timings[runStart]
+                let end = runEnd < totalCount ? timings[runEnd] : max(lineEnd, start + 0.02 * Double(count))
+                let span = end - start
+                if span > 0 {
+                    for i in runStart..<runEnd {
+                        timings[i] = start + span * Double(i - runStart + 1) / Double(count + 1)
+                    }
+                }
+            }
+            runStart = runEnd
+        }
         return timings
     }
 
@@ -86,7 +109,8 @@ enum LyricsWordParser {
         let sorted = raw.sorted { ($0.time, $0.isBackground ? 1 : 0) < ($1.time, $1.isBackground ? 1 : 0) }
         let lines = sorted.indices.map { idx in
             let item = sorted[idx]
-            let timings = wordTimingsToCharTimings(fullText: item.text, words: item.words, lineStart: item.time)
+            let timings = wordTimingsToCharTimings(fullText: item.text, words: item.words,
+                                                   lineStart: item.time, lineEnd: max(item.time, item.end))
             return LyricLine(id: idx, time: item.time, end: max(item.time, item.end), text: item.text,
                              charTimings: timings, agent: item.agent, isBackground: item.isBackground)
         }

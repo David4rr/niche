@@ -40,7 +40,10 @@ enum YouTubeMusicClient {
             let subtitleRuns = columnRuns(cols[1])
             if !targetArtists.isEmpty, !artistMatches(subtitleRuns: subtitleRuns, targetArtists: targetArtists) { continue }
             if duration > 0 {
-                guard let itemDur = extractDuration(from: subtitleRuns), abs(itemDur - duration) <= 5.0 else { continue }
+                // Limusic reads the exact video the player reports. With only title and artist,
+                // a loose window lands on live, remastered or karaoke uploads whose lyrics are
+                // wrong. Two seconds still covers intra-upload rounding, not another cut.
+                guard let itemDur = extractDuration(from: subtitleRuns), abs(itemDur - duration) <= 2.0 else { continue }
             }
             return videoId
         }
@@ -130,7 +133,7 @@ enum YouTubeMusicClient {
     }
 
     private static func titleMatches(_ row: String, _ target: String) -> Bool {
-        row == target || [" - ", " feat.", " feat ", " ft.", " ft "].contains { row.hasPrefix(target + $0) || target.hasPrefix(row + $0) }
+        row == target
     }
 
     private static func artistMatches(subtitleRuns: [String], targetArtists: [String]) -> Bool {
@@ -140,7 +143,7 @@ enum YouTubeMusicClient {
         var rowArtists = LyricsNormalization.artistVariants(raw).map(norm).filter { !$0.isEmpty }
         let whole = norm(raw)
         if !whole.isEmpty, !rowArtists.contains(whole) { rowArtists.insert(whole, at: 0) }
-        return targetArtists.contains { t in rowArtists.contains { $0 == t || (min($0.count, t.count) >= 4 && ($0.contains(t) || t.contains($0))) } }
+        return targetArtists.contains { t in rowArtists.contains(t) }
     }
 
     private static func extractDuration(from subtitleRuns: [String]) -> Double? {

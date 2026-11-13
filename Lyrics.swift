@@ -18,8 +18,21 @@ final class Lyrics {
             load(track)
         }
     }
-    var isKaraoke: Bool {
-        didSet { UserDefaults.standard.set(isKaraoke, forKey: "lyricsKaraoke") }
+    var providerOrder: [LyricsSource] {
+        didSet {
+            UserDefaults.standard.set(providerOrder.map(\.rawValue).joined(separator: ","), forKey: "lyricsProviderOrder")
+            guard source == .automatic else { return }
+            let track = self.track
+            key = ""
+            Task { [weak self] in
+                // An automatic answer is cached without its order, so the same song would keep
+                // the source the old order picked. Reordering is rare; start clean.
+                await LyricsCache.shared.clear()
+                guard let self, self.source == .automatic else { return }
+                self.key = ""
+                self.load(track)
+            }
+        }
     }
     var delay: Double {
         didSet { UserDefaults.standard.set(delay, forKey: "lyricsDelay") }
@@ -31,10 +44,20 @@ final class Lyrics {
     @ObservationIgnored private var measured = (text: "", width: CGFloat(0))
 
     init() {
-        UserDefaults.standard.register(defaults: ["lyricsSource": LyricsSource.automatic.rawValue, "lyricsKaraoke": true, "lyricsDelay": 0.0])
-        source = LyricsSource(rawValue: UserDefaults.standard.string(forKey: "lyricsSource")!)!
-        isKaraoke = UserDefaults.standard.bool(forKey: "lyricsKaraoke")
-        delay = UserDefaults.standard.double(forKey: "lyricsDelay")
+        let defaults = UserDefaults.standard
+        defaults.register(defaults: ["lyricsSource": LyricsSource.automatic.rawValue, "lyricsDelay": 0.0])
+        // Karaoke used to be a switch that could hide word timing a source had. It now follows
+        // the source: word-timed lyrics sweep, line-synced ones do not. Drop the stale key.
+        defaults.removeObject(forKey: "lyricsKaraoke")
+        let savedSource = defaults.string(forKey: "lyricsSource") ?? LyricsSource.automatic.rawValue
+        source = LyricsSource(rawValue: savedSource) ?? .automatic
+        delay = defaults.double(forKey: "lyricsDelay")
+        let stored = (defaults.string(forKey: "lyricsProviderOrder") ?? "")
+            .split(separator: ",")
+            .compactMap { LyricsSource(rawValue: String($0)) }
+            .filter { $0 != .automatic }
+            .reduce(into: [LyricsSource]()) { if !$0.contains($1) { $0.append($1) } }
+        providerOrder = stored + LyricsSource.defaultOrder.filter { !stored.contains($0) }
     }
 
     static let closedFont = NSFont(descriptor: NSFont.systemFont(ofSize: 11.5, weight: .semibold).fontDescriptor.withDesign(.rounded)!, size: 11.5)!
@@ -87,6 +110,7 @@ final class Lyrics {
         }
         let key = "\(track.artist)|\(track.title)|\(track.album)".lowercased()
         let source = self.source
+        let order = providerOrder
         guard key != self.key else { return }
         self.key = key
         task?.cancel()
@@ -111,7 +135,8 @@ final class Lyrics {
                 artist: track.artist,
                 album: track.album,
                 duration: track.duration,
-                source: source
+                source: source,
+                order: order
             )
             guard !Task.isCancelled, let self, self.key == key else { return }
             if case .loaded(let lines, let synced) = result {
