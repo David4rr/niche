@@ -52,6 +52,9 @@ final class LabState {
     var showOmp: Bool {
         didSet { UserDefaults.standard.set(showOmp, forKey: "showOmp"); applyAgentSettings() }
     }
+    var showAgy: Bool {
+        didSet { UserDefaults.standard.set(showAgy, forKey: "showAgy"); applyAgentSettings() }
+    }
     var showLockIndicator: Bool {
         didSet { UserDefaults.standard.set(showLockIndicator, forKey: "showLockIndicator") }
     }
@@ -85,12 +88,13 @@ final class LabState {
     init() {
         let defaults = UserDefaults.standard
         defaults.register(defaults: ["showInMenuBar": true, "liveVisualizer": false, "showAgents": true,
-                                     "showClaude": true, "showOmp": true, "showLockIndicator": true, "hideInFullscreen": false, "notchStyle": "island"])
+                                     "showClaude": true, "showOmp": true, "showAgy": true, "showLockIndicator": true, "hideInFullscreen": false, "notchStyle": "island"])
         self.showInMenuBar = defaults.bool(forKey: "showInMenuBar")
         self.liveVisualizer = defaults.bool(forKey: "liveVisualizer")
         self.showAgents = defaults.bool(forKey: "showAgents")
         self.showClaude = defaults.bool(forKey: "showClaude")
         self.showOmp = defaults.bool(forKey: "showOmp")
+        self.showAgy = defaults.bool(forKey: "showAgy")
         self.showLockIndicator = defaults.bool(forKey: "showLockIndicator")
         self.hideInFullscreen = defaults.bool(forKey: "hideInFullscreen")
         self.notchStyle = NotchStyle(rawValue: defaults.string(forKey: "notchStyle")!)!
@@ -125,6 +129,7 @@ final class LabState {
         var kinds: Set<AgentKind> = []
         if showAgents && showClaude { kinds.insert(.claude) }
         if showAgents && showOmp { kinds.insert(.omp) }
+        if showAgents && showAgy { kinds.insert(.agy) }
         agents.enabled = kinds
     }
     private static var realNotch: CGSize? { NotchScreen.shared.notch }

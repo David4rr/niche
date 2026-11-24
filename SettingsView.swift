@@ -202,6 +202,9 @@ struct SettingsView: View {
                 Toggle(isOn: $lab.showOmp) {
                     Label { Text("omp") } icon: { AgentGlyph(kind: .omp, size: 12) }
                 }
+                Toggle(isOn: $lab.showAgy) {
+                    Label { Text("Antigravity") } icon: { AgentGlyph(kind: .agy, size: 12) }
+                }
             }
             .disabled(!lab.showAgents)
             Section {

@@ -29,9 +29,15 @@ final class AgentUsage {
         fetchedAt = Date()
         Task {
             var fresh = kinds.contains(.claude) ? await Self.claudeAccounts() : []
-            if kinds.contains(.omp) { fresh += await Self.ompAccounts() }
+            if kinds.contains(.omp) { fresh += await Self.ompAccounts(excludingAntigravity: kinds.contains(.agy)) }
+            if kinds.contains(.agy) { fresh += await Self.agyAccounts() }
             let kept = accounts.filter { old in kinds.contains(old.kind) && !fresh.contains { $0.id == old.id } }
-            let merged = (fresh + kept).sorted { ($0.kind == .omp ? 1 : 0, $0.id) < ($1.kind == .omp ? 1 : 0, $1.id) }
+            let sortOrder: [AgentKind: Int] = [.claude: 0, .omp: 1, .agy: 2]
+            let merged = (fresh + kept).sorted {
+                let o0 = sortOrder[$0.kind, default: 99]
+                let o1 = sortOrder[$1.kind, default: 99]
+                return (o0, $0.id) < (o1, $1.id)
+            }
             guard merged != accounts else { return }
             withAnimation(.arrive) { accounts = merged }
         }
@@ -78,7 +84,7 @@ final class AgentUsage {
         }
     }
 
-    nonisolated private static func ompAccounts() async -> [UsageAccount] {
+    nonisolated private static func ompAccounts(excludingAntigravity: Bool = false) async -> [UsageAccount] {
         let db = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".omp/agent/agent.db").path
         let query = """
             select u.provider, u.limit_id, u.label, u.window_label, u.used_fraction, u.resets_at from usage_history u
@@ -95,6 +101,7 @@ final class AgentUsage {
             guard let provider = row["provider"] as? String, let limit = row["limit_id"] as? String, let label = row["label"] as? String,
                   let windowLabel = row["window_label"] as? String, let used = row["used_fraction"] as? Double,
                   let resetsAt = row["resets_at"] as? Double, let span = span(of: windowLabel) else { continue }
+            if provider == "google-antigravity" && excludingAntigravity { continue }
             let card: (name: String, detail: String?)
             switch provider {
             case "anthropic":
@@ -115,18 +122,49 @@ final class AgentUsage {
             }
             return UsageAccount(id: id, kind: .omp, name: card.name, detail: card.detail, windows: windows)
         }
+    }
 
-        func span(of window: String) -> (label: String, seconds: Int)? {
-            switch window.lowercased() {
-            case "daily": return ("1d", 86_400)
-            case "weekly": return ("7d", 604_800)
-            default:
-                let parts = window.lowercased().split(separator: " ")
-                guard parts.count == 2, let count = Int(parts[0]) else { return nil }
-                if parts[1].hasPrefix("hour") { return ("\(count)h", count * 3_600) }
-                if parts[1].hasPrefix("day") { return ("\(count)d", count * 86_400) }
-                return nil
+    nonisolated private static func agyAccounts() async -> [UsageAccount] {
+        let db = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".omp/agent/agent.db").path
+        let query = """
+            select u.provider, u.limit_id, u.label, u.window_label, u.used_fraction, u.resets_at from usage_history u
+            join (select max(id) id from usage_history group by account_key, limit_id) latest on latest.id = u.id
+            where u.provider = 'google-antigravity' and u.used_fraction is not null and u.window_label is not null and u.resets_at > 0
+              and exists (select 1 from auth_credentials a where a.provider = u.provider and a.disabled_cause is null
+                          and instr(u.account_key, a.identity_key) > 0)
+            """
+        let output = AgentMonitor.run("/usr/bin/sqlite3", ["-readonly", "-json", db, query])
+        guard let rows = try? JSONSerialization.jsonObject(with: Data(output.utf8)) as? [[String: Any]] else { return [] }
+        let now = Date()
+        var cards: [String: (name: String, detail: String?, windows: [String: (span: Int, entries: [(used: Double, reset: Date)])])] = [:]
+        for row in rows {
+            guard let label = row["label"] as? String,
+                  let windowLabel = row["window_label"] as? String, let used = row["used_fraction"] as? Double,
+                  let resetsAt = row["resets_at"] as? Double, let span = span(of: windowLabel) else { continue }
+            let name = label.replacingOccurrences(of: " (shared)", with: "").lowercased()
+            let id = "agy-\(name)"
+            let reset = Date(timeIntervalSince1970: resetsAt / 1000)
+            cards[id, default: (name, "antigravity", [:])].windows[span.label, default: (span.seconds, [])].entries.append((used, reset))
+        }
+        return cards.map { id, card in
+            let windows = card.windows.sorted { $0.value.span < $1.value.span }.map { label, window in
+                let used = window.entries.map { $0.reset < now ? 0 : $0.used }.reduce(0, +) / Double(window.entries.count)
+                return UsageWindow(label: label, used: used, resetsAt: window.entries.map(\.reset).filter { $0 > now }.min())
             }
+            return UsageAccount(id: id, kind: .agy, name: card.name, detail: card.detail, windows: windows)
+        }
+    }
+
+    nonisolated private static func span(of window: String) -> (label: String, seconds: Int)? {
+        switch window.lowercased() {
+        case "daily": return ("1d", 86_400)
+        case "weekly": return ("7d", 604_800)
+        default:
+            let parts = window.lowercased().split(separator: " ")
+            guard parts.count == 2, let count = Int(parts[0]) else { return nil }
+            if parts[1].hasPrefix("hour") { return ("\(count)h", count * 3_600) }
+            if parts[1].hasPrefix("day") { return ("\(count)d", count * 86_400) }
+            return nil
         }
     }
 }
@@ -318,6 +356,10 @@ private struct UsageRing: View {
 
     static func tint(_ kind: AgentKind, _ used: Double) -> Color {
         if used >= 0.85 { return Color(red: 1, green: 0.36, blue: 0.3) }
-        return kind == .claude ? Color(red: 0.85, green: 0.47, blue: 0.34) : Color(red: 0.55, green: 0.76, blue: 1)
+        switch kind {
+        case .claude: return Color(red: 0.85, green: 0.47, blue: 0.34)
+        case .omp: return Color(red: 0.55, green: 0.76, blue: 1)
+        case .agy: return Color(red: 0.65, green: 0.55, blue: 0.98)
+        }
     }
 }

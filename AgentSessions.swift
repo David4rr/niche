@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum AgentKind: CaseIterable {
-    case claude, omp
+    case claude, omp, agy
 }
 
 struct AgentSession: Identifiable, Equatable {
@@ -45,7 +45,9 @@ final class AgentMonitor {
     private func refresh() {
         let kinds = enabled
         queue.async { [weak self] in
-            let found = (kinds.contains(.claude) ? Self.claudeSessions() : []) + (kinds.contains(.omp) ? Self.ompSessions() : [])
+            let found = (kinds.contains(.claude) ? Self.claudeSessions() : []) +
+                        (kinds.contains(.omp) ? Self.ompSessions() : []) +
+                        (kinds.contains(.agy) ? Self.agySessions() : [])
             Task { @MainActor in
                 guard let self else { return }
                 let live = found.filter { self.enabled.contains($0.kind) }
@@ -255,6 +257,62 @@ final class AgentMonitor {
         return found.sorted { $0.id < $1.id }
     }
 
+    nonisolated private static func agySessions() -> [AgentSession] {
+        let lsofOutput = run("/usr/sbin/lsof", ["-c", "agy", "-F", "pn"])
+        var pidByConv: [String: pid_t] = [:]
+        var currentPID: pid_t?
+        for line in lsofOutput.split(separator: "\n") {
+            if line.hasPrefix("p"), let pid = pid_t(line.dropFirst()) {
+                currentPID = pid
+            } else if line.hasPrefix("n"), line.contains("/presence/"), line.hasSuffix(".lock"), let pid = currentPID {
+                let path = String(line.dropFirst())
+                let convId = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+                if !convId.isEmpty {
+                    pidByConv[convId] = pid
+                }
+            }
+        }
+        guard !pidByConv.isEmpty else { return [] }
+
+        let db = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".gemini/antigravity-cli/conversation_summaries.db").path
+        guard FileManager.default.fileExists(atPath: db) else { return [] }
+
+        let idList = pidByConv.keys.map { "'\($0)'" }.joined(separator: ",")
+        let query = "select conversation_id, title, status, workspace_uris from conversation_summaries where conversation_id in (\(idList));"
+        let output = run("/usr/bin/sqlite3", ["-readonly", "-json", db, query])
+        guard let rows = try? JSONSerialization.jsonObject(with: Data(output.utf8)) as? [[String: Any]] else { return [] }
+
+        var found: [AgentSession] = []
+        for row in rows {
+            guard let convId = row["conversation_id"] as? String,
+                  let pid = pidByConv[convId] else { continue }
+            let title = row["title"] as? String
+            let status = (row["status"] as? String) ?? ""
+            let isWorking = status.contains("RUNNING")
+
+            var project = "Antigravity"
+            if let urisStr = row["workspace_uris"] as? String,
+               let data = urisStr.data(using: .utf8),
+               let uris = try? JSONSerialization.jsonObject(with: data) as? [String],
+               let first = uris.first {
+                let clean = first.replacingOccurrences(of: "file://", with: "")
+                let name = URL(fileURLWithPath: clean).lastPathComponent
+                if !name.isEmpty { project = name }
+            }
+
+            found.append(AgentSession(
+                id: "agy-\(convId)",
+                kind: .agy,
+                title: (title?.isEmpty == false) ? title : nil,
+                account: nil,
+                project: project,
+                state: isWorking ? .working : .paused,
+                pid: pid
+            ))
+        }
+        return found.sorted { $0.id < $1.id }
+    }
+
     nonisolated private static func tailLines(of url: URL, bytes: UInt64) -> [Substring] {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return [] }
         defer { try? handle.close() }
@@ -302,6 +360,11 @@ struct AgentGlyph: View {
             Text("π")
                 .font(.system(size: size + 3, weight: .heavy, design: .serif))
                 .foregroundStyle(Color(red: 0.55, green: 0.76, blue: 1))
+                .frame(width: size, height: size)
+        case .agy:
+            Image(systemName: "atom")
+                .font(.system(size: size * 0.9, weight: .bold))
+                .foregroundStyle(Color(red: 0.65, green: 0.55, blue: 0.98))
                 .frame(width: size, height: size)
         }
     }
