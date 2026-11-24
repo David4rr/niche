@@ -125,16 +125,62 @@ final class AgentUsage {
     }
 
     nonisolated private static func agyAccounts() async -> [UsageAccount] {
-        let db = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".omp/agent/agent.db").path
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let candidates = [
+            home.appending(path: ".local/bin/agy").path,
+            "/usr/local/bin/agy",
+            "/opt/homebrew/bin/agy",
+            home.appending(path: ".nix-profile/bin/agy").path
+        ]
+        if let agy = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            let output = AgentMonitor.run(agy, ["-p", "/usage", "--output-format", "json"], timeoutSeconds: 10)
+            if let data = output.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: Data(data)) as? [String: Any],
+               let command = json["command"] as? [String: Any],
+               let cmdData = command["data"] as? [String: Any],
+               let groups = cmdData["groups"] as? [[String: Any]], !groups.isEmpty {
+                var found: [UsageAccount] = []
+                let isoFormatter = ISO8601DateFormatter()
+                for group in groups {
+                    guard let groupName = group["name"] as? String,
+                          let buckets = group["buckets"] as? [[String: Any]] else { continue }
+                    let cardName: String
+                    if groupName.localizedCaseInsensitiveContains("gemini") {
+                        cardName = "gemini"
+                    } else if groupName.localizedCaseInsensitiveContains("claude") || groupName.localizedCaseInsensitiveContains("gpt") {
+                        cardName = "claude & gpt"
+                    } else {
+                        cardName = groupName.lowercased()
+                    }
+                    var windows: [UsageWindow] = []
+                    for bucket in buckets {
+                        guard let rem = bucket["remaining_fraction"] as? Double else { continue }
+                        let windowStr = (bucket["window"] as? String) ?? ""
+                        let spanInfo = span(of: windowStr)
+                        let label = spanInfo?.label ?? (windowStr.lowercased() == "weekly" ? "7d" : windowStr)
+                        let used = max(0.0, min(1.0, 1.0 - rem))
+                        let resetDate = (bucket["reset_time"] as? String).flatMap { isoFormatter.date(from: $0) }
+                        windows.append(UsageWindow(label: label, used: used, resetsAt: resetDate))
+                    }
+                    windows.sort { ($0.label == "5h" ? 0 : 1) < ($1.label == "5h" ? 0 : 1) }
+                    found.append(UsageAccount(id: "agy-\(cardName)", kind: .agy, name: cardName, detail: nil, windows: windows))
+                }
+                if !found.isEmpty {
+                    return found
+                }
+            }
+        }
+
+        // Fallback: Check ~/.omp/agent/agent.db if present
+        let db = home.appending(path: ".omp/agent/agent.db").path
+        guard FileManager.default.fileExists(atPath: db) else { return [] }
         let query = """
             select u.provider, u.limit_id, u.label, u.window_label, u.used_fraction, u.resets_at from usage_history u
             join (select max(id) id from usage_history group by account_key, limit_id) latest on latest.id = u.id
             where u.provider = 'google-antigravity' and u.used_fraction is not null and u.window_label is not null and u.resets_at > 0
-              and exists (select 1 from auth_credentials a where a.provider = u.provider and a.disabled_cause is null
-                          and instr(u.account_key, a.identity_key) > 0)
             """
         let output = AgentMonitor.run("/usr/bin/sqlite3", ["-readonly", "-json", db, query])
-        guard let rows = try? JSONSerialization.jsonObject(with: Data(output.utf8)) as? [[String: Any]] else { return [] }
+        guard let rows = try? JSONSerialization.jsonObject(with: Data(output.utf8)) as? [[String: Any]], !rows.isEmpty else { return [] }
         let now = Date()
         var cards: [String: (name: String, detail: String?, windows: [String: (span: Int, entries: [(used: Double, reset: Date)])])] = [:]
         for row in rows {
@@ -144,7 +190,7 @@ final class AgentUsage {
             let name = label.replacingOccurrences(of: " (shared)", with: "").lowercased()
             let id = "agy-\(name)"
             let reset = Date(timeIntervalSince1970: resetsAt / 1000)
-            cards[id, default: (name, "antigravity", [:])].windows[span.label, default: (span.seconds, [])].entries.append((used, reset))
+            cards[id, default: (name, nil, [:])].windows[span.label, default: (span.seconds, [])].entries.append((used, reset))
         }
         return cards.map { id, card in
             let windows = card.windows.sorted { $0.value.span < $1.value.span }.map { label, window in
@@ -157,8 +203,9 @@ final class AgentUsage {
 
     nonisolated private static func span(of window: String) -> (label: String, seconds: Int)? {
         switch window.lowercased() {
-        case "daily": return ("1d", 86_400)
-        case "weekly": return ("7d", 604_800)
+        case "daily", "1d": return ("1d", 86_400)
+        case "weekly", "7d": return ("7d", 604_800)
+        case "5h": return ("5h", 18_000)
         default:
             let parts = window.lowercased().split(separator: " ")
             guard parts.count == 2, let count = Int(parts[0]) else { return nil }
@@ -313,7 +360,12 @@ private extension UsageAccount {
     var peak: Double { windows.reduce(0) { max($0, $1.used) } }
     var isIdle: Bool { peak < 0.05 }
     var title: String {
-        let base = kind == .omp ? "omp \(name)" : name
+        let base: String
+        switch kind {
+        case .omp: base = "omp \(name)"
+        case .agy: base = "agy \(name)"
+        case .claude: base = name
+        }
         return detail.map { "\(base) (\($0))" } ?? base
     }
 }

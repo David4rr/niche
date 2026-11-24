@@ -323,7 +323,7 @@ final class AgentMonitor {
         return start > 0 ? Array(lines.dropFirst()) : lines
     }
 
-    nonisolated static func run(_ tool: String, _ arguments: [String]) -> String {
+    nonisolated static func run(_ tool: String, _ arguments: [String], timeoutSeconds: Double = 5) -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: tool)
         process.arguments = arguments
@@ -337,7 +337,7 @@ final class AgentMonitor {
             return ""
         }
         let timeout = DispatchWorkItem { if process.isRunning { process.terminate() } }
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 5, execute: timeout)
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeoutSeconds, execute: timeout)
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         timeout.cancel()
