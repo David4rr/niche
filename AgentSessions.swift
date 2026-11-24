@@ -258,48 +258,82 @@ final class AgentMonitor {
     }
 
     nonisolated private static func agySessions() -> [AgentSession] {
-        let lsofOutput = run("/usr/sbin/lsof", ["-c", "agy", "-F", "pn"])
+        let psRows = run("/bin/ps", ["-Ao", "pid=,ppid=,tty=,command="]).split(separator: "\n").compactMap { line -> (pid: pid_t, tty: String, cmd: String)? in
+            let parts = line.split(separator: " ")
+            guard parts.count >= 4 else { return nil }
+            let cmdParts = parts.dropFirst(3)
+            guard cmdParts.contains(where: { $0 == "agy" || $0.hasSuffix("/agy") }),
+                  !cmdParts.contains(where: { $0 == "/usage" || $0 == "-p" }),
+                  let pid = pid_t(parts[0]) else { return nil }
+            return (pid, String(parts[2]), cmdParts.joined(separator: " "))
+        }
+
         var pidByConv: [String: pid_t] = [:]
+        var cwdByPid: [pid_t: String] = [:]
+
+        let lsofOutput: String
+        if !psRows.isEmpty {
+            let pidList = psRows.map { String($0.pid) }.joined(separator: ",")
+            lsofOutput = run("/usr/sbin/lsof", ["-p", pidList, "-F", "fnp"])
+        } else {
+            lsofOutput = run("/usr/sbin/lsof", ["-c", "agy", "-F", "fnp"])
+        }
+
         var currentPID: pid_t?
+        var expectingCwd = false
         for line in lsofOutput.split(separator: "\n") {
             if line.hasPrefix("p"), let pid = pid_t(line.dropFirst()) {
                 currentPID = pid
-            } else if line.hasPrefix("n"), line.contains("/presence/"), line.hasSuffix(".lock"), let pid = currentPID {
+                expectingCwd = false
+            } else if line.hasPrefix("fcwd") {
+                expectingCwd = true
+            } else if line.hasPrefix("n") {
                 let path = String(line.dropFirst())
-                let convId = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
-                if !convId.isEmpty {
-                    pidByConv[convId] = pid
+                if expectingCwd, let pid = currentPID {
+                    cwdByPid[pid] = path
+                    expectingCwd = false
+                } else if path.contains("/presence/"), path.hasSuffix(".lock"), let pid = currentPID {
+                    let convId = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+                    if !convId.isEmpty { pidByConv[convId] = pid }
                 }
             }
         }
         guard !pidByConv.isEmpty else { return [] }
 
         let db = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".gemini/antigravity-cli/conversation_summaries.db").path
-        guard FileManager.default.fileExists(atPath: db) else { return [] }
-
-        let idList = pidByConv.keys.map { "'\($0)'" }.joined(separator: ",")
-        let query = "select conversation_id, title, status, workspace_uris from conversation_summaries where conversation_id in (\(idList));"
-        let output = run("/usr/bin/sqlite3", ["-readonly", "-json", db, query])
-        guard let rows = try? JSONSerialization.jsonObject(with: Data(output.utf8)) as? [[String: Any]] else { return [] }
+        var metadataByConv: [String: (title: String?, status: String, project: String?)] = [:]
+        if FileManager.default.fileExists(atPath: db) {
+            let idList = pidByConv.keys.map { "'\($0)'" }.joined(separator: ",")
+            let query = "select conversation_id, title, status, workspace_uris from conversation_summaries where conversation_id in (\(idList));"
+            let output = run("/usr/bin/sqlite3", ["-json", "file://\(db)?immutable=1", query])
+            if let data = output.data(using: .utf8),
+               let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                for row in rows {
+                    guard let cid = row["conversation_id"] as? String else { continue }
+                    let title = row["title"] as? String
+                    let status = (row["status"] as? String) ?? ""
+                    var proj: String?
+                    if let urisStr = row["workspace_uris"] as? String,
+                       let udata = urisStr.data(using: .utf8),
+                       let uris = try? JSONSerialization.jsonObject(with: udata) as? [String],
+                       let first = uris.first {
+                        let clean = first.replacingOccurrences(of: "file://", with: "")
+                        let name = URL(fileURLWithPath: clean).lastPathComponent
+                        if !name.isEmpty { proj = name }
+                    }
+                    metadataByConv[cid] = (title, status, proj)
+                }
+            }
+        }
 
         var found: [AgentSession] = []
-        for row in rows {
-            guard let convId = row["conversation_id"] as? String,
-                  let pid = pidByConv[convId] else { continue }
-            let title = row["title"] as? String
-            let status = (row["status"] as? String) ?? ""
+        for (convId, pid) in pidByConv {
+            let meta = metadataByConv[convId]
+            let title = meta?.title
+            let status = meta?.status ?? ""
             let isWorking = status.contains("RUNNING")
-
-            var project = "Antigravity"
-            if let urisStr = row["workspace_uris"] as? String,
-               let data = urisStr.data(using: .utf8),
-               let uris = try? JSONSerialization.jsonObject(with: data) as? [String],
-               let first = uris.first {
-                let clean = first.replacingOccurrences(of: "file://", with: "")
-                let name = URL(fileURLWithPath: clean).lastPathComponent
-                if !name.isEmpty { project = name }
-            }
-
+            let cwdProj = cwdByPid[pid].map { URL(fileURLWithPath: $0).lastPathComponent }
+            let project = meta?.project ?? cwdProj ?? "Antigravity"
             found.append(AgentSession(
                 id: "agy-\(convId)",
                 kind: .agy,

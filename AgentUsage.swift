@@ -24,9 +24,9 @@ final class AgentUsage {
     @ObservationIgnored private var kinds: Set<AgentKind> = []
 
     func refresh(kinds: Set<AgentKind>) {
-        if kinds == self.kinds, let fetchedAt, Date().timeIntervalSince(fetchedAt) < 300 { return }
+        if kinds == self.kinds, let fetchedAt, Date().timeIntervalSince(fetchedAt) < (accounts.isEmpty ? 15 : 300) { return }
         self.kinds = kinds
-        fetchedAt = Date()
+        if !accounts.isEmpty { fetchedAt = Date() }
         Task {
             var fresh = kinds.contains(.claude) ? await Self.claudeAccounts() : []
             if kinds.contains(.omp) { fresh += await Self.ompAccounts(excludingAntigravity: kinds.contains(.agy)) }
@@ -38,6 +38,7 @@ final class AgentUsage {
                 let o1 = sortOrder[$1.kind, default: 99]
                 return (o0, $0.id) < (o1, $1.id)
             }
+            if !merged.isEmpty { fetchedAt = Date() }
             guard merged != accounts else { return }
             withAnimation(.arrive) { accounts = merged }
         }
